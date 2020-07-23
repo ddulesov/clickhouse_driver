@@ -627,7 +627,7 @@ mod test {
     impl<'a> AsyncBufRead for AsyncChunk<'a> {
         fn poll_fill_buf(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
             // Force read by small chunks
-            Poll::Ready(Ok(&self.buf[0..0]))
+            Poll::Ready(Ok(&[]))
         }
 
         fn consume(self: Pin<&mut Self>, _amt: usize) {

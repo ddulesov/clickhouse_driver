@@ -239,7 +239,7 @@ static uint64 CityHash64(const char *s, size_t len) {
 }
 
 extern "C" uint64 _CityHash64(const char *s, size_t len){
-    return _CityHash64(s, len);
+    return CityHash64(s, len);
 }
 /*
 static uint64 CityHash64WithSeed(const char *s, size_t len, uint64 seed) {
