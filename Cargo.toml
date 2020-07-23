@@ -1,0 +1,5 @@
+[workspace]
+
+members = [
+    "clickhouse-driver","cityhash","lz4a","derive","cityhash-rs"
+]

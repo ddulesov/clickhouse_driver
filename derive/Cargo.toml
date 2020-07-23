@@ -1,0 +1,13 @@
+[package]
+name = "clickhouse-derive"
+version = "0.1.1"
+authors = ["Dmitry Dulesov <dmitry.dulesov@gmail.com>"]
+edition = "2018"
+
+
+[dependencies]
+syn = "1.0.31"
+quote = "1.0.7"
+
+[lib]
+proc-macro = true

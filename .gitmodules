@@ -1,0 +1,4 @@
+[submodule "lz4a/liblz4"]
+	path = lz4a/liblz4
+	url = https://github.com/lz4/lz4.git
+	branch = master
