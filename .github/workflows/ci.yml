@@ -13,12 +13,24 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
-
+    services:
+      clickhouse:
+        # Docker Hub image
+        image: yandex/clickhouse-server
+        ports:
+          - 8123:8123
+          - 9000:9000
     steps:
     - uses: actions/checkout@v2
       with:
-        submodules: true   
+        submodules: true 
+    - name: CreateClickhouseDB
+      run: |
+        curl --data-binary @tests/create.sql -u 'default:'  'http://localhost:8123/default'
+        curl --data-binary @tests/main.tsv -u 'default:'  'http://localhost:8123/default?query=INSERT%20INTO%20main(i64,u64,i32,u32,i16,u16,i8,u8,f32,f64,title,lcs,mon,d,t,dt64,uuid,e8,e16,ip4,ip6,n,dm1,dm2)%20FORMAT%20TabSeparated'    
     - name: Build
       run: cargo build --verbose
     - name: Run Clippy
       run: cargo clippy --all-targets
+    - name: Run Tests
+      run: cargo test --all 
