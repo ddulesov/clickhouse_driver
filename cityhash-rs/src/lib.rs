@@ -283,7 +283,7 @@ pub fn city_hash_128(src: &[u8]) -> Pair {
         citymurmur(&src[16..], Pair(fetch64(&src[..]) ^ K3, fetch64(&src[8..])))
     } else if src.len() >= 8 {
         citymurmur(
-            &src[0..0],
+            &[],
             Pair(
                 fetch64(&src[..]) ^ (K0.wrapping_mul(src.len() as u64)),
                 fetch64(&src[src.len() - 8..]) ^ K1,
