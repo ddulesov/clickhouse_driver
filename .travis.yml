@@ -1,5 +1,9 @@
 sudo: required
 language: rust
+branches:
+  except:
+  - dev
+  - patch
 addons:
   apt:
     packages:
