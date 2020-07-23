@@ -241,11 +241,12 @@ static uint64 CityHash64(const char *s, size_t len) {
 extern "C" uint64 _CityHash64(const char *s, size_t len){
     return _CityHash64(s, len);
 }
-
+/*
 static uint64 CityHash64WithSeed(const char *s, size_t len, uint64 seed) {
   return CityHash64WithSeeds(s, len, k2, seed);
 }
 
+*/
 static uint64 CityHash64WithSeeds(const char *s, size_t len,
                            uint64 seed0, uint64 seed1) {
   return HashLen16(CityHash64(s, len) - seed0, seed1);
@@ -343,7 +344,7 @@ static uint128 CityHash128WithSeed(const char *s, size_t len, uint128 seed) {
   return uint128(HashLen16(x + v.second, w.second) + y,
                  HashLen16(x + w.second, y + v.second));
 }
-
+/*
 static  uint128 CityHash128(const char *s, size_t len) {
   if (len >= 16) {
     return CityHash128WithSeed(s + 16,
@@ -359,7 +360,7 @@ static  uint128 CityHash128(const char *s, size_t len) {
     return CityHash128WithSeed(s, len, uint128(k0, k1));
   }
 }
-
+*/
 extern "C" uint128 _CityHash128(const char *s, size_t len) {
   if (len >= 16) {
     return CityHash128WithSeed(s + 16,

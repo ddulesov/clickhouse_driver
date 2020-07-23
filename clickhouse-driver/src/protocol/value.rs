@@ -230,10 +230,7 @@ where
     }
 
     fn is_compatible(&self, field: &Field) -> bool {
-        match field.sql_type {
-            SqlType::String | SqlType::FixedString(_) | SqlType::Enum8 | SqlType::Enum16 => true,
-            _ => false,
-        }
+        matches!(field.sql_type, SqlType::String | SqlType::FixedString(_) | SqlType::Enum8 | SqlType::Enum16)        
     }
 }
 
@@ -451,12 +448,7 @@ impl_intocolumn_simple!(Decimal128, |f| {
 });
 
 // TODO make available to insert into DateTime64
-impl_intocolumn_simple!(DateTime<Utc>, |f| {
-    match f.sql_type {
-        SqlType::DateTime | SqlType::DateTime64(..) => true,
-        _ => false,
-    }
-});
+impl_intocolumn_simple!(DateTime<Utc>, |f| matches!(f.sql_type, SqlType::DateTime | SqlType::DateTime64(..)) );
 
 impl_intocolumn_simple!(Uuid, |f| f.sql_type == SqlType::Uuid);
 impl_intocolumn_string!(&str);

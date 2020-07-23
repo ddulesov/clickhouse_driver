@@ -28,7 +28,7 @@ unsafe fn crc32_64(mut src: &[u8]) -> u64 {
         src = &src[8..];
     }
 
-    if src.len() > 0 {
+    if !src.is_empty() {
         let mut buf = [0u8; 8];
         let s = std::cmp::min(8, src.len());
 
