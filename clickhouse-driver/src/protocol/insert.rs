@@ -69,11 +69,9 @@ impl<'a, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> InsertSink<'a, R, W> {
             .columns
             .iter()
             .zip(data.column_iter())
-            .all(|(head, col)| {
-                head.name.eq(col.name)
-                    && head.field.nullable == col.nullable
-                    && col.data.is_compatible(&head.field)
-            })
+            .all(|(head, col)| 
+                head.name.eq(col.name) && head.field.nullable == col.nullable && col.data.is_compatible(&head.field)
+            )
         {
             return Err(ConversionError::UnsupportedConversion.into());
         }

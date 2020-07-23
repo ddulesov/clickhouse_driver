@@ -3,7 +3,6 @@ use clickhouse_driver::prelude::errors;
 use clickhouse_driver::prelude::*;
 use std::env;
 use std::net::Ipv4Addr;
-use tokio;
 use uuid::Uuid;
 
 pub fn get_pool() -> Pool {
