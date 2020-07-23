@@ -52,7 +52,7 @@ typedef uint32_t uint32;
 typedef uint64_t uint64;
 typedef std::pair<uint64, uint64> uint128;
 
-extern "C"{
+
 inline uint64 Uint128Low64(const uint128& x) { return x.first; }
 inline uint64 Uint128High64(const uint128& x) { return x.second; }
 
@@ -87,6 +87,6 @@ inline uint64 Hash128to64(const uint128& x) {
   b *= kMul;
   return b;
 }
-}
+
 
 #endif  // CITY_HASH_H_
