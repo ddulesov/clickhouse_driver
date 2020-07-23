@@ -108,8 +108,8 @@ async fn test_insert_number() -> errors::Result<()> {
     assert_eq!(s_i16, 19);
     assert_eq!(s_u8, 19);
     assert_eq!(s_i8, 19);
-    assert_eq!(s_f32, 19.0_f64);
-    assert_eq!(s_f64, 19.0_f64);
+    assert!( (s_f32 - 19.0_f64).abs() < 0.01_f64  );
+    assert!( (s_f64 - 19.0_f64).abs() < 0.01_f64 );
 
     Ok(())
 }
