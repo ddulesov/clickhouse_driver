@@ -1,4 +1,5 @@
 # ClickHouse Rust Client #
+[![Build Status](https://travis-ci.org/ddulesov/clickhouse_driver.svg?branch=master)](https://travis-ci.org/ddulesov/clickhouse_driver)
 
 Asynchronous tokio-based pure rust Clickhouse client library 
  
