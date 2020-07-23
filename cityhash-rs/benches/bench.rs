@@ -1,3 +1,4 @@
+#![cfg(rustc_nightly)]
 #![feature(test)]
 #![feature(core_intrinsics)]
 
