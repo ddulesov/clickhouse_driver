@@ -1,4 +1,3 @@
-use std::fmt;
 use std::io;
 use std::net::Shutdown;
 use std::time::Duration;

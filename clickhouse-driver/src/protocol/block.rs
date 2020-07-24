@@ -147,9 +147,9 @@ impl<'b> Block<'b> {
     }
     /// Add new column to the block
     /// NOTE! columns should be added in order of INSERT query
-    pub fn add<T: 'b>(mut self, name: &'b str, data: &'b [T]) -> Self
+    pub fn add<T: 'b>(mut self, name: &'b str, data:  Vec<T>) -> Self
     where
-        T: IntoColumn,
+        T: IntoColumn<'b>,
     {
         self.set_rows(data.len());
 
@@ -163,9 +163,9 @@ impl<'b> Block<'b> {
     /// Add new column to block.
     /// As opposed to add method here we add column for Nullable data types.
     /// Option None value is used to describe null data.
-    pub fn add_nullable<T: 'b>(mut self, name: &'b str, data: &'b [Option<T>]) -> Self
+    pub fn add_nullable<T: 'b>(mut self, name: &'b str, data: Vec<Option<T>>) -> Self
     where
-        Option<T>: IntoColumn,
+        Option<T>: IntoColumn<'b>,
         T: Default,
     {
         self.set_rows(data.len());

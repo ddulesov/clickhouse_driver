@@ -12,8 +12,8 @@ use std::io::Write;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use uuid::Uuid;
 
-pub trait IntoColumn: Sized {
-    fn to_column<'a>(this: &'a [Self]) -> Box<dyn AsOutColumn + 'a>;
+pub trait IntoColumn<'b>: Sized {
+    fn to_column(this:  Vec<Self>) -> Box<dyn AsOutColumn+ 'b>;
 }
 
 lazy_static! {
@@ -28,12 +28,12 @@ pub(crate) trait ToColumn {
     fn to_column(&self, field: &Field, writer: &mut dyn Write) -> Result<()>;
 }
 
-struct SimpleOutputColumn<'a, T, F: Fn(&Field) -> bool> {
-    data: &'a [T],
+struct SimpleOutputColumn<T, F: Fn(&Field) -> bool> {
+    data: Vec<T>,
     f: F,
 }
 
-impl<'a, T, F> AsOutColumn for SimpleOutputColumn<'a, T, F>
+impl<T, F> AsOutColumn for SimpleOutputColumn<T, F>
 where
     T: ToColumn,
     F: Fn(&Field) -> bool,
@@ -43,7 +43,7 @@ where
     }
 
     fn encode(&self, field: &Field, writer: &mut dyn Write) -> Result<()> {
-        for item in self.data {
+        for item in self.data.iter() {
             <T as ToColumn>::to_column(item, field, writer)?;
         }
         Ok(())
@@ -91,7 +91,7 @@ impl_null!(DateTime<Utc>, chrono::MIN_DATE.and_hms(0, 0, 0));
 impl_null!(&str, Default::default());
 impl_null!(String, Default::default());
 
-impl<'a, T, F> AsOutColumn for SimpleOutputColumn<'a, Option<T>, F>
+impl<T, F> AsOutColumn for SimpleOutputColumn<Option<T>, F>
 where
     T: ToColumn + NullValue,
     F: Fn(&Field) -> bool,
@@ -110,7 +110,7 @@ where
             writer.write_u8(item)?;
         }
         let def: T = NullValue::null();
-        for item in self.data {
+        for item in self.data.iter() {
             <T as ToColumn>::to_column(item.as_ref().unwrap_or(&def), field, writer)?;
         }
         Ok(())
@@ -199,11 +199,11 @@ fn encode_enum16<T: AsRef<[u8]>>(
     Ok(())
 }
 
-struct StringOutputColumn<'a, T> {
-    data: &'a [T],
+struct StringOutputColumn<T> {
+    data: Vec<T>,
 }
 
-impl<'a, T> AsOutColumn for StringOutputColumn<'a, T>
+impl<'a, T> AsOutColumn for StringOutputColumn<T>
 where
     T: AsRef<[u8]>,
 {
@@ -213,15 +213,15 @@ where
 
     fn encode(&self, field: &Field, writer: &mut dyn Write) -> Result<()> {
         match field.sql_type {
-            SqlType::String => encode_string(self.data, writer),
-            SqlType::FixedString(v) => encode_fixedstring(self.data, v, writer),
+            SqlType::String => encode_string(self.data.as_ref(), writer),
+            SqlType::FixedString(v) => encode_fixedstring(self.data.as_ref(), v, writer),
             SqlType::Enum8 => encode_enum8(
-                self.data,
+                self.data.as_ref(),
                 field.get_meta().expect("enum index corrupted"),
                 writer,
             ),
             SqlType::Enum16 => encode_enum16(
-                self.data,
+                self.data.as_ref(),
                 field.get_meta().expect("enum index corrupted"),
                 writer,
             ),
@@ -351,21 +351,21 @@ impl<T: ToColumn + DecimalBits> ToColumn for Decimal<T> {
 /// Some data types u(i)8,16,32,64 f32, f64 have the same
 /// representation  in memory and in Clickhouse columnar data format
 /// so they can be easily encoded all at once
-struct BinaryCompatibleOutColumn<'a, T: Sized> {
+struct BinaryCompatibleOutColumn<T: Sized> {
     sql_type: SqlType,
-    data: &'a [T],
+    data: Vec<T>,
 }
 
 fn encode_data_bc(data: &[u8], writer: &mut dyn Write) -> io::Result<()> {
     writer.write_all(data)
 }
 
-impl<'a, T: Sized + Send + Sync> AsOutColumn for BinaryCompatibleOutColumn<'a, T> {
+impl<'a, T: Sized + Send + Sync> AsOutColumn for BinaryCompatibleOutColumn<T> {
     fn len(&self) -> usize {
         self.data.len()
     }
     fn encode(&self, _field: &Field, writer: &mut dyn Write) -> Result<()> {
-        encode_data_bc(unsafe { as_bytes_bufer(self.data) }, writer).map_err(Into::into)
+        encode_data_bc(unsafe { as_bytes_bufer(self.data.as_ref()) }, writer).map_err(Into::into)
     }
     fn is_compatible(&self, field: &Field) -> bool {
         self.sql_type == field.sql_type
@@ -374,8 +374,8 @@ impl<'a, T: Sized + Send + Sync> AsOutColumn for BinaryCompatibleOutColumn<'a, T
 
 macro_rules! impl_intocolumn_bc {
     ($fs: ty, $sql: path) => {
-        impl IntoColumn for $fs {
-            fn to_column<'b>(this: &'b [$fs]) -> Box<dyn AsOutColumn + 'b> {
+        impl<'b> IntoColumn<'b> for $fs {
+            fn to_column(this: Vec<$fs>) -> Box<dyn AsOutColumn +'b > {
                 Box::new(BinaryCompatibleOutColumn {
                     data: this,
                     sql_type: $sql,
@@ -387,8 +387,9 @@ macro_rules! impl_intocolumn_bc {
 
 macro_rules! impl_intocolumn_simple {
     ($fs: ty, $sql: expr) => {
-        impl IntoColumn for $fs {
-            fn to_column<'b>(this: &'b [$fs]) -> Box<dyn AsOutColumn + 'b> {
+        impl<'b> IntoColumn<'b> for $fs
+        where $fs: 'b{
+            fn to_column(this: Vec<$fs>) -> Box<dyn AsOutColumn +'b > {
                 Box::new(SimpleOutputColumn {
                     data: this,
                     f: $sql,
@@ -400,8 +401,9 @@ macro_rules! impl_intocolumn_simple {
 
 macro_rules! impl_intocolumn_string {
     ($fs: ty) => {
-        impl IntoColumn for $fs {
-            fn to_column<'b>(this: &'b [$fs]) -> Box<dyn AsOutColumn + 'b> {
+        impl<'b> IntoColumn<'b> for $fs
+        where $fs: 'b{
+            fn to_column(this: Vec<$fs>) -> Box<dyn AsOutColumn +'b> {
                 Box::new(StringOutputColumn { data: this })
             }
         }
@@ -451,7 +453,7 @@ impl_intocolumn_simple!(Decimal128, |f| {
 impl_intocolumn_simple!(DateTime<Utc>, |f| matches!(f.sql_type, SqlType::DateTime | SqlType::DateTime64(..)) );
 
 impl_intocolumn_simple!(Uuid, |f| f.sql_type == SqlType::Uuid);
-impl_intocolumn_string!(&str);
+impl_intocolumn_string!(&'b str);
 impl_intocolumn_string!(String);
 
 //Nullable types
@@ -471,7 +473,7 @@ impl_intocolumn_simple!(Option<Ipv6Addr>, |f| f.sql_type == SqlType::Ipv6);
 impl_intocolumn_simple!(Option<Date<Utc>>, |f| f.sql_type == SqlType::Date);
 impl_intocolumn_simple!(Option<DateTime<Utc>>, |f| f.sql_type == SqlType::DateTime);
 
-impl_intocolumn_simple!(Option<&str>, |f| f.sql_type == SqlType::String);
+impl_intocolumn_simple!(Option<&'b str>, |f| f.sql_type == SqlType::String);
 impl_intocolumn_simple!(Option<String>, |f| f.sql_type == SqlType::String);
 
 impl_intocolumn_simple!(Option<Decimal32>, |f| {

@@ -78,12 +78,12 @@ async fn main() -> Result<(), io::Error> {
 
     let block = {
         Block::new("blob")
-            .add("id", id.as_ref())
-            .add("url", url.as_ref())
-            .add("date", date.as_ref())
-            .add("client", client.as_ref())
-            .add("ip", ip.as_ref())
-            .add("value", value.as_ref())
+            .add("id", id.clone())
+            .add("url", url.clone())
+            .add("date", date.clone())
+            .add("client", client.clone())
+            .add("ip", ip.clone())
+            .add("value", value.clone())
     };
 
     let database_url =
@@ -100,12 +100,12 @@ async fn main() -> Result<(), io::Error> {
         for _ in 1u64..1000000 {
             let block = {
                 Block::new("")
-                    .add("id", id.as_ref())
-                    .add("url", url.as_ref())
-                    .add("date", date.as_ref())
-                    .add("client", client.as_ref())
-                    .add("ip", ip.as_ref())
-                    .add("value", value.as_ref())
+                    .add("id", id.clone())
+                    .add("url", url.clone())
+                    .add("date", date.clone())
+                    .add("client", client.clone())
+                    .add("ip", ip.clone())
+                    .add("value", value.clone())
             };
             insert.next(block).await?;
         }

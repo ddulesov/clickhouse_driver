@@ -42,6 +42,11 @@ int128 = []
 name = "insert-select"
 required-features = ["cityhash_rs"]
 
+[[example]]
+name = "bulk-insert"
+required-features = ["cityhash_rs"]
+
+
 [[test]]
 name = "pool"
 

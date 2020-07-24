@@ -58,16 +58,16 @@ async fn test_insert_number() -> errors::Result<()> {
 
     let block = {
         Block::new("test_insert_number")
-            .add("id", &data1[..])
-            .add("i64", &data2[..])
-            .add("u32", &data3[..])
-            .add("i32", &data4[..])
-            .add("u16", &data5[..])
-            .add("i16", &data6[..])
-            .add("u8", &data7[..])
-            .add("i8", &data8[..])
-            .add("f32", &data9[..])
-            .add("f64", &data10[..])
+            .add("id", data1)
+            .add("i64", data2)
+            .add("u32", data3)
+            .add("i32", data4)
+            .add("u16", data5)
+            .add("i16", data6)
+            .add("u8", data7)
+            .add("i8", data8)
+            .add("f32", data9)
+            .add("f64", data10)
     };
 
     let mut insert = conn.insert(block).await?;
@@ -126,9 +126,9 @@ async fn test_insert_enum() -> errors::Result<()> {
 
     let block = {
         Block::new(table)
-            .add("id", &data_0[..])
-            .add("e8", &data_1[..])
-            .add("e16", &data_2[..])
+            .add("id", data_0.clone())
+            .add("e8", data_1.clone())
+            .add("e16", data_2.clone())
     };
 
     conn.execute("DROP TABLE IF EXISTS test_insert_enum")
@@ -145,9 +145,9 @@ async fn test_insert_enum() -> errors::Result<()> {
     for _ in 1u32..100u32 {
         let block = {
             Block::new(table)
-                .add("id", &data_0[..])
-                .add("e8", &data_1[..])
-                .add("e16", &data_2[..])
+                .add("id", data_0.clone())
+                .add("e8", data_1.clone())
+                .add("e16", data_2.clone())
         };
         insert.next(block).await?;
     }
@@ -182,9 +182,9 @@ async fn test_insert_nullable() -> errors::Result<()> {
 
     let block = {
         Block::new(table)
-            .add("id", &data_0[..])
-            .add_nullable("s", &data_1[..])
-            .add_nullable("i", &data_2[..])
+            .add("id", data_0.clone())
+            .add_nullable("s", data_1.clone())
+            .add_nullable("i", data_2.clone())
     };
 
     conn.execute("DROP TABLE IF EXISTS test_insert_nullable")
@@ -201,9 +201,9 @@ async fn test_insert_nullable() -> errors::Result<()> {
     for _ in 1u32..100u32 {
         let block = {
             Block::new(table)
-                .add("id", &data_0[..])
-                .add_nullable("s", &data_1[..])
-                .add_nullable("i", &data_2[..])
+                .add("id", data_0.clone())
+                .add_nullable("s", data_1.clone())
+                .add_nullable("i", data_2.clone())
         };
         insert.next(block).await?;
     }
@@ -239,9 +239,9 @@ async fn test_insert_string() -> errors::Result<()> {
 
     let block = {
         Block::new(table)
-            .add("id", &data_0[..])
-            .add("s", &data_1[..])
-            .add("fs", &data_1[..])
+            .add("id", data_0.clone())
+            .add("s", data_1.clone())
+            .add("fs", data_1.clone())
     };
 
     conn.execute("DROP TABLE IF EXISTS test_insert_string")
@@ -258,9 +258,9 @@ async fn test_insert_string() -> errors::Result<()> {
     for _ in 1u32..100u32 {
         let block = {
             Block::new(table)
-                .add("id", &data_0[..])
-                .add("s", &data_1[..])
-                .add("fs", &data_1[..])
+                .add("id", data_0.clone())
+                .add("s", data_1.clone())
+                .add("fs", data_1.clone())
         };
         insert.next(block).await?;
     }
@@ -299,10 +299,10 @@ async fn test_insert_date() -> errors::Result<()> {
 
     let block = {
         Block::new(table)
-            .add("id", &data_0[..])
-            .add("d", &data_1[..])
-            .add("t1", &data_2[..])
-            .add("t2", &data_2[..])
+            .add("id", data_0.clone())
+            .add("d", data_1.clone())
+            .add("t1", data_2.clone())
+            .add("t2", data_2.clone())
     };
 
     conn.execute("DROP TABLE IF EXISTS test_insert_date")
@@ -320,10 +320,10 @@ async fn test_insert_date() -> errors::Result<()> {
     for _ in 1u32..100u32 {
         let block = {
             Block::new(table)
-                .add("id", &data_0[..])
-                .add("d", &data_1[..])
-                .add("t1", &data_2[..])
-                .add("t2", &data_2[..])
+                .add("id", data_0.clone())
+                .add("d",  data_1.clone())
+                .add("t1", data_2.clone())
+                .add("t2", data_2.clone())
         };
         insert.next(block).await?;
     }
@@ -358,8 +358,8 @@ async fn test_insert_uuid() -> errors::Result<()> {
 
     let block = {
         Block::new(table)
-            .add("id", &data_0[..])
-            .add("u", &data_1[..])
+            .add("id", data_0.clone())
+            .add("u", data_1.clone())
     };
 
     conn.execute("DROP TABLE IF EXISTS test_insert_uuid")
@@ -369,8 +369,8 @@ async fn test_insert_uuid() -> errors::Result<()> {
     for _ in 1u32..100u32 {
         let block = {
             Block::new(table)
-                .add("id", &data_0[..])
-                .add("u", &data_1[..])
+                .add("id", data_0.clone())
+                .add("u", data_1.clone())
         };
         insert.next(block).await?;
     }
@@ -405,9 +405,9 @@ async fn test_insert_decimal() -> errors::Result<()> {
 
     let block = {
         Block::new(table)
-            .add("id", &data_0[..])
-            .add("d32", &data_1[..])
-            .add("d64", &data_2[..])
+            .add("id", data_0.clone())
+            .add("d32", data_1.clone())
+            .add("d64", data_2.clone())
     };
 
     conn.execute("DROP TABLE IF EXISTS test_insert_decimal")
@@ -424,9 +424,9 @@ async fn test_insert_decimal() -> errors::Result<()> {
     for _ in 1u32..100u32 {
         let block = {
             Block::new(table)
-                .add("id", &data_0[..])
-                .add("d32", &data_1[..])
-                .add("d64", &data_2[..])
+                .add("id", data_0.clone())
+                .add("d32", data_1.clone())
+                .add("d64", data_2.clone())
         };
         insert.next(block).await?;
     }
@@ -466,9 +466,9 @@ async fn test_insert_ip() -> errors::Result<()> {
 
     let block = {
         Block::new(table)
-            .add("id", &data_0[..])
-            .add("ip4", &data_1[..])
-            .add("ip6", &data_2[..])
+            .add("id", data_0.clone())
+            .add("ip4", data_1.clone())
+            .add("ip6", data_2.clone())
     };
 
     conn.execute("DROP TABLE IF EXISTS test_insert_ip").await?;
@@ -485,9 +485,9 @@ async fn test_insert_ip() -> errors::Result<()> {
     for _ in 1u32..100u32 {
         let block = {
             Block::new(table)
-                .add("id", &data_0[..])
-                .add("ip4", &data_1[..])
-                .add("ip6", &data_2[..])
+                .add("id", data_0.clone())
+                .add("ip4", data_1.clone())
+                .add("ip6", data_2.clone())
         };
         insert.next(block).await?;
     }

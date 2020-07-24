@@ -1,5 +1,5 @@
 use std::convert::TryFrom;
-use std::{borrow::Cow, fmt, str::FromStr, time::Duration};
+use std::{borrow::Cow, str::FromStr, time::Duration};
 
 use url::Url;
 
