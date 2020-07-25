@@ -6,9 +6,9 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use uuid::Uuid;
 
 pub fn get_pool() -> Pool {
-    let database_url =
-        env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "tcp://localhost?execute_timeout=5s&query_timeout=20s&pool_max=4&compression=lz4".into());
+    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "tcp://localhost?execute_timeout=5s&query_timeout=20s&pool_max=4&compression=lz4".into()
+    });
 
     Pool::create(database_url).expect("provide connection url in DATABASE_URL env variable")
 }
@@ -108,8 +108,8 @@ async fn test_insert_number() -> errors::Result<()> {
     assert_eq!(s_i16, 19);
     assert_eq!(s_u8, 19);
     assert_eq!(s_i8, 19);
-    assert!( (s_f32 - 19.0_f64).abs() < 0.01_f64  );
-    assert!( (s_f64 - 19.0_f64).abs() < 0.01_f64 );
+    assert!((s_f32 - 19.0_f64).abs() < 0.01_f64);
+    assert!((s_f64 - 19.0_f64).abs() < 0.01_f64);
 
     Ok(())
 }
@@ -321,7 +321,7 @@ async fn test_insert_date() -> errors::Result<()> {
         let block = {
             Block::new(table)
                 .add("id", data_0.clone())
-                .add("d",  data_1.clone())
+                .add("d", data_1.clone())
                 .add("t1", data_2.clone())
                 .add("t2", data_2.clone())
         };

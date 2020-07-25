@@ -13,7 +13,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use uuid::Uuid;
 
 pub trait IntoColumn<'b>: Sized {
-    fn to_column(this:  Vec<Self>) -> Box<dyn AsOutColumn+ 'b>;
+    fn to_column(this: Vec<Self>) -> Box<dyn AsOutColumn + 'b>;
 }
 
 lazy_static! {
@@ -230,7 +230,7 @@ where
     }
 
     fn is_compatible(&self, field: &Field) -> bool {
-        matches!(field.sql_type, SqlType::String | SqlType::FixedString(_) | SqlType::Enum8 | SqlType::Enum16)        
+        matches!(field.sql_type, SqlType::String | SqlType::FixedString(_) | SqlType::Enum8 | SqlType::Enum16)
     }
 }
 
@@ -375,7 +375,7 @@ impl<'a, T: Sized + Send + Sync> AsOutColumn for BinaryCompatibleOutColumn<T> {
 macro_rules! impl_intocolumn_bc {
     ($fs: ty, $sql: path) => {
         impl<'b> IntoColumn<'b> for $fs {
-            fn to_column(this: Vec<$fs>) -> Box<dyn AsOutColumn +'b > {
+            fn to_column(this: Vec<$fs>) -> Box<dyn AsOutColumn + 'b> {
                 Box::new(BinaryCompatibleOutColumn {
                     data: this,
                     sql_type: $sql,
@@ -388,8 +388,10 @@ macro_rules! impl_intocolumn_bc {
 macro_rules! impl_intocolumn_simple {
     ($fs: ty, $sql: expr) => {
         impl<'b> IntoColumn<'b> for $fs
-        where $fs: 'b{
-            fn to_column(this: Vec<$fs>) -> Box<dyn AsOutColumn +'b > {
+        where
+            $fs: 'b,
+        {
+            fn to_column(this: Vec<$fs>) -> Box<dyn AsOutColumn + 'b> {
                 Box::new(SimpleOutputColumn {
                     data: this,
                     f: $sql,
@@ -402,8 +404,10 @@ macro_rules! impl_intocolumn_simple {
 macro_rules! impl_intocolumn_string {
     ($fs: ty) => {
         impl<'b> IntoColumn<'b> for $fs
-        where $fs: 'b{
-            fn to_column(this: Vec<$fs>) -> Box<dyn AsOutColumn +'b> {
+        where
+            $fs: 'b,
+        {
+            fn to_column(this: Vec<$fs>) -> Box<dyn AsOutColumn + 'b> {
                 Box::new(StringOutputColumn { data: this })
             }
         }
@@ -450,7 +454,10 @@ impl_intocolumn_simple!(Decimal128, |f| {
 });
 
 // TODO make available to insert into DateTime64
-impl_intocolumn_simple!(DateTime<Utc>, |f| matches!(f.sql_type, SqlType::DateTime | SqlType::DateTime64(..)) );
+impl_intocolumn_simple!(DateTime<Utc>, |f| matches!(
+    f.sql_type,
+    SqlType::DateTime | SqlType::DateTime64(..)
+));
 
 impl_intocolumn_simple!(Uuid, |f| f.sql_type == SqlType::Uuid);
 impl_intocolumn_string!(&'b str);

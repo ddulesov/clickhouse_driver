@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::fmt;
 use std::{borrow::Cow, str::FromStr, time::Duration};
 
 use url::Url;
@@ -228,7 +229,6 @@ impl Options {
     }
 }
 
-#[cfg(debug_assertions)]
 impl fmt::Debug for Options {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Options")
@@ -323,7 +323,7 @@ mod test {
     use crate::pool::Pool;
 
     #[test]
-    fn test_default_config() -> Result<()>  {
+    fn test_default_config() -> Result<()> {
         let pool = Pool::create("tcp://localhost?ping_timeout=1ms").unwrap();
 
         assert_eq!(pool.options().database, "default");

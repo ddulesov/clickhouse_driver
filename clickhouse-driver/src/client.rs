@@ -1,3 +1,4 @@
+use std::fmt;
 use std::io;
 use std::net::Shutdown;
 use std::time::Duration;
@@ -217,7 +218,6 @@ pub struct Connection {
     out: Vec<u8>,
 }
 
-#[cfg(debug_assertions)]
 impl fmt::Debug for Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let peer = self.inner.socket.as_ref().map_or("-".to_string(), |s| {

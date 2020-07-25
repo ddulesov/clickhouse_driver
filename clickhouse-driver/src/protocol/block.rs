@@ -147,7 +147,7 @@ impl<'b> Block<'b> {
     }
     /// Add new column to the block
     /// NOTE! columns should be added in order of INSERT query
-    pub fn add<T: 'b>(mut self, name: &'b str, data:  Vec<T>) -> Self
+    pub fn add<T: 'b>(mut self, name: &'b str, data: Vec<T>) -> Self
     where
         T: IntoColumn<'b>,
     {
