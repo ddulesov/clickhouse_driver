@@ -278,7 +278,7 @@ impl Pool {
     }
 
     #[inline]
-    fn options(&self) -> &Options {
+    pub fn options(&self) -> &Options {
         &self.inner.options
     }
 }

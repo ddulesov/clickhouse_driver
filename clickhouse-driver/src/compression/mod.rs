@@ -106,7 +106,7 @@ impl<R: AsyncBufRead + Unpin> LZ4ReadAdapter<R> {
             inner: reader,
         }
     }
-    /// Consume adapter bufered uncompressed block data
+    /// Consume adapter buffered uncompressed block data
     #[allow(dead_code)]
     fn into_vec(self) -> Vec<u8> {
         if let CompressionState::Raw(v) = self.state {
@@ -115,11 +115,6 @@ impl<R: AsyncBufRead + Unpin> LZ4ReadAdapter<R> {
             panic!("consume incomplete LZ4 Block");
         }
     }
-
-    // #[inline]
-    // fn is_fill(&self) -> bool {
-    //     matches!(self.state, CompressionState::Raw(_))
-    // }
 
     fn fill(&mut self, cx: &mut Context<'_>) -> Poll<Result<&[u8], io::Error>> {
         loop {
@@ -185,19 +180,17 @@ impl<R: AsyncBufRead + Unpin> LZ4ReadAdapter<R> {
                             buf.resize(*compressed as usize, 0);
                         };
                     } else {
-                        self.length += ready!(Pin::new(&mut self.inner)
+                        let read = ready!(Pin::new(&mut self.inner)
                             .poll_read(cx, &mut buf[self.length..(*compressed as usize)])?);
+                        self.length += read;
                         if self.length >= *compressed as usize {
                             let calculated_hash = city_hash_128(&buf[..]);
-
-                            //debug_assert_eq!(calculated_hash, self.hash);
 
                             if calculated_hash != self.hash {
                                 self.state = CompressionState::Raw(Vec::new());
                                 return Poll::Ready(Err(io::Error::new(
                                     io::ErrorKind::InvalidData,
                                     errors::DriverError::BadHash,
-                                    //"block hash mismatch. data corrupted",
                                 )));
                             }
                             self.length = 0;
@@ -211,7 +204,6 @@ impl<R: AsyncBufRead + Unpin> LZ4ReadAdapter<R> {
                                     return Poll::Ready(Err(io::Error::new(
                                         io::ErrorKind::InvalidData,
                                         errors::DriverError::BadCompressedPacketHeader,
-                                        //"LZ4 decompression failed",
                                     )));
                                 }
                                 debug_assert_eq!(res as u32, *decompressed);
@@ -243,7 +235,7 @@ impl<R: AsyncBufRead + Unpin> AsyncRead for LZ4ReadAdapter<R> {
         };
         buf[0..toread].copy_from_slice(&inner[0..toread]);
         me.length += toread;
-
+        // read next block
         if toread == ready_to_read {
             me.state = CompressionState::Hash;
             me.length = 0;

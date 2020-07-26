@@ -126,7 +126,6 @@ impl<'a, R: AsyncRead + Unpin> ResponseStream<'a, R> {
             return Ok(None);
         }
         let mut code = [0u8; 1];
-
         loop {
             if 0 == self.reader.read(&mut code[..]).await? {
                 return Ok(None);
@@ -136,7 +135,6 @@ impl<'a, R: AsyncRead + Unpin> ResponseStream<'a, R> {
 
             match code {
                 _code @ SERVER_PONG => {
-                    //self.set_fuse();
                     return Ok(Some(Response::Pong));
                 }
                 _code @ SERVER_END_OF_STREAM => {
@@ -150,13 +148,14 @@ impl<'a, R: AsyncRead + Unpin> ResponseStream<'a, R> {
                     // Skip temporary table name
                     let mut rdr = ValueReader::new(self.reader.borrow_mut());
                     let l = rdr.read_vint().await?;
-                    //rdr.skip(l).await?;
 
                     Pin::new(self.reader.borrow_mut()).consume(l as usize);
 
                     //TODO: read_block from `dyn AsyncRead`
+
                     let resp = (if self.info.compression == CompressionMethod::LZ4 {
                         let mut lz4 = LZ4ReadAdapter::new(self.reader.borrow_mut());
+
                         read_block(&mut lz4, &self.columns, self.info.timezone).await
                     } else {
                         read_block(self.reader.borrow_mut(), &self.columns, self.info.timezone)

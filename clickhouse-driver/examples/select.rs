@@ -3,8 +3,8 @@ extern crate clickhouse_driver;
 extern crate tokio;
 extern crate uuid;
 
-use std::{env, io, time};
 use clickhouse_driver::prelude::*;
+use std::{env, io, time};
 
 type ServerDate = chrono::DateTime<chrono::Utc>;
 
@@ -15,19 +15,19 @@ struct Perf {
     date: ServerDate,
 }
 
-macro_rules! get{
-    ($row: ident, $i: expr, $err: ident)=>{
-        $row.value($i)?.ok_or_else( $err )?;
-    }
+macro_rules! get {
+    ($row: ident, $i: expr, $err: ident) => {
+        $row.value($i)?.ok_or_else($err)?;
+    };
 }
 
 impl Deserialize for Perf {
     fn deserialize(row: Row) -> errors::Result<Self> {
         let err = || errors::ConversionError::UnsupportedConversion;
 
-        let id: u32 = get!(row,0, err);
-        let name: &str = get!(row,1, err);
-        let date: ServerDate = get!(row,2, err);
+        let id: u32 = get!(row, 0, err);
+        let name: &str = get!(row, 1, err);
+        let date: ServerDate = get!(row, 2, err);
 
         Ok(Perf {
             id,
@@ -36,7 +36,6 @@ impl Deserialize for Perf {
         })
     }
 }
-
 
 #[tokio::main]
 async fn main() -> Result<(), io::Error> {
@@ -50,21 +49,16 @@ async fn main() -> Result<(), io::Error> {
         eprintln!("connection establish {} msec", start.elapsed().as_millis());
         start = time::Instant::now();
 
-        let mut result = conn
-            .query("SELECT id, name, dt FROM perf")
-            .await?;
+        let mut result = conn.query("SELECT id, name, dt FROM perf").await?;
 
         let mut sum: u64 = 0;
         while let Some(block) = result.next().await? {
-            /*
-            for  item in block.iter::<Perf>() {
+            for item in block.iter::<Perf>() {
                 sum += item.id as u64;
             }
-            */
         }
         eprintln!("fetch block {} msec", start.elapsed().as_millis());
         eprintln!("{}", sum);
-        drop(sum);
     }
 
     Ok(())

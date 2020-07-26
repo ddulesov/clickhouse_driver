@@ -182,6 +182,7 @@ impl Inner {
                     return Err(DriverError::ConnectionTimeout.into());
                 }
             };
+            inner.info.compression = options.compression;
         }
         Ok(inner)
     }
