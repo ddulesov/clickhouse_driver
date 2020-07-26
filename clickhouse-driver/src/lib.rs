@@ -39,8 +39,8 @@ mod types;
 
 #[allow(dead_code)]
 const MAX_STRING_LEN: usize = 64 * 1024;
-/// Max number of rows in server block, 64K is default value
-const MAX_BLOCK_SIZE: usize = 64 * 1024;
+/// Max number of rows in server block, 640K is default value
+const MAX_BLOCK_SIZE: usize = 640 * 1024;
 /// Max size of server block, bytes, 1M is default value
 const MAX_BLOCK_SIZE_BYTES: usize = 10 * 1024 * 1024;
 /// Connection state flags

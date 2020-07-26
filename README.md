@@ -14,9 +14,9 @@ Asynchronous tokio-based pure rust Clickhouse client library
 ### Supported features ###
 
 * Asynchronous tokio-based engine
-* Native protocol over TCP (tls not supported)
+* Native Clickhouse protocol
 * LZ4 compression
-* Provide persistent connection pool
+* Persistent connection pool
 * Simple row to object mapper
 * Date | DateTime | DateTime64- read/write
 * (U)Int(8|16|32|64) - read/write
@@ -24,7 +24,7 @@ Asynchronous tokio-based pure rust Clickhouse client library
 * UUID - read/write
 * String | FixedString- read/write
 * Ipv4 | Ipv6 - read/write
-* Nullable(*) - read only
+* Nullable(*) - read/write
 * Decimal - read/write
 * Enum8, Enum16 - read/write
 

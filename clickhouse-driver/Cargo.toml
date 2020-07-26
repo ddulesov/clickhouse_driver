@@ -1,11 +1,15 @@
 [package]
 name = "clickhouse_driver"
-version = "0.1.0"
+description = "Asynchronous tokio-based Yandex ClickHouse driver."
+version = "0.1.0-alpha.1"
 license = "MIT"
 authors = ["dmitry dulesov <dmitry.dulesov@gmail.com>"]
+homepage = "https://github.com/ddulesov/clickhouse_driver"
+readme = "README.md"
 edition = "2018"
 keywords = ["tokio", "database", "clickhouse"]
 categories = ["database"]
+exclude = ["tests/*", "examples/*"]
 
 [dependencies]
 clickhouse-cityhash = { version="0.1.0", path="../cityhash", optional=true}
@@ -46,6 +50,9 @@ required-features = ["cityhash_rs"]
 name = "bulk-insert"
 required-features = ["cityhash_rs"]
 
+[[example]]
+name = "select"
+required-features = ["cityhash_rs"]
 
 [[test]]
 name = "pool"
@@ -55,4 +62,6 @@ name = "query"
 
 [[test]]
 name = "insert"
+
+
 

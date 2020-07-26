@@ -340,7 +340,7 @@ impl Connection {
     /// Returns InsertSink that can be used to streaming next Blocks of data
     pub async fn insert(
         &mut self,
-        data: Block<'_>,
+        data: &Block<'_>,
     ) -> Result<InsertSink<'_, ReadHalf<'_>, WriteHalf<'_>>> {
         check_pending!(self);
 
@@ -362,7 +362,7 @@ impl Connection {
             return Err(DriverError::PacketOutOfOrder(0).into());
         };
 
-        stream.next(data).await?;
+        stream.next(&data).await?;
         Ok(stream)
     }
     /// Execute SELECT query returning Block of data

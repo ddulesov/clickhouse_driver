@@ -53,7 +53,7 @@ impl<'a, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> InsertSink<'a, R, W> {
         }
     }
     /// Send block of data to Clickhouse server
-    pub async fn next(&mut self, data: Block<'_>) -> Result<()> {
+    pub async fn next(&mut self, data: &Block<'_>) -> Result<()> {
         self.buf.clear();
         // The number of Columns must be the same!
         // As a precaution check it

@@ -136,6 +136,7 @@ pub enum ValueRefEnum<'a> {
     Int16(i16),
     Int32(i32),
     Int64(i64),
+    #[cfg(feature = "int128")]
     UInt128(u128),
     Float32(f32),
     Float64(f64),

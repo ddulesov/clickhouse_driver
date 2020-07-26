@@ -80,20 +80,35 @@ impl<'a> Value<'a, &'a str> for ValueRef<'a> {
         }
     }
 }
+
+#[inline]
+fn decimal_scale_from_field(field: &Field) -> u8 {
+    match field.sql_type {
+        SqlType::Decimal(_, s) => s,
+        _ => 0, //unreachable
+    }
+}
+
 /// Implement SqlType::Decimal32 -> Decimal<i32> data conversion
 impl<'a> Value<'a, Decimal32> for ValueRef<'a> {
-    fn get(&'a self, _: &'a Field) -> Result<Option<Decimal32>> {
+    fn get(&'a self, field: &'a Field) -> Result<Option<Decimal32>> {
         match self.inner {
-            Some(ValueRefEnum::Decimal32(v)) => Ok(Some(Decimal::from_parts(v.0, v.1, v.2))),
+            Some(ValueRefEnum::Decimal32(v)) => {
+                let scale = decimal_scale_from_field(field);
+                Ok(Some(Decimal::from(v.0, scale)))
+            }
             _ => Err(ConversionError::UnsupportedConversion.into()),
         }
     }
 }
 /// Implement SqlType::Decimal64 -> Decimal<i64> data conversion
 impl<'a> Value<'a, Decimal64> for ValueRef<'a> {
-    fn get(&'a self, _: &'a Field) -> Result<Option<Decimal64>> {
+    fn get(&'a self, field: &'a Field) -> Result<Option<Decimal64>> {
         match self.inner {
-            Some(ValueRefEnum::Decimal64(v)) => Ok(Some(Decimal::from_parts(v.0, v.1, v.2))),
+            Some(ValueRefEnum::Decimal64(v)) => {
+                let scale = decimal_scale_from_field(field);
+                Ok(Some(Decimal::from(v.0, scale)))
+            }
             _ => Err(ConversionError::UnsupportedConversion.into()),
         }
     }
@@ -101,9 +116,12 @@ impl<'a> Value<'a, Decimal64> for ValueRef<'a> {
 /// Implement SqlType::Decimal128 -> Decimal<i128> data conversion
 #[cfg(feature = "int128")]
 impl<'a> Value<'a, Decimal128> for ValueRef<'a> {
-    fn get(&'a self, _: &'a Field) -> Result<Option<Decimal128>> {
+    fn get(&'a self, field: &'a Field) -> Result<Option<Decimal128>> {
         match self.inner {
-            Some(ValueRefEnum::Decimal128(v)) => Ok(Some(Decimal::from_parts(v.0, v.1, v.2))),
+            Some(ValueRefEnum::Decimal128(v)) => {
+                let scale = decimal_scale_from_field(field);
+                Ok(Some(Decimal::from(v.0, scale)))
+            }
             _ => Err(ConversionError::UnsupportedConversion.into()),
         }
     }
@@ -134,7 +152,7 @@ impl_value!(Ipv6Addr, ValueRefEnum::Ip6);
 impl_value!(Uuid, ValueRefEnum::Uuid);
 // SqlType::Enum(x)|String|FixedSring(size) - > &[u8]
 impl_value!(&'a [u8], ValueRefEnum::String);
-
+// SqlType::X t-> X
 impl_value!(u64, ValueRefEnum::UInt64);
 impl_value!(i64, ValueRefEnum::Int64);
 impl_value!(u32, ValueRefEnum::UInt32);
@@ -144,7 +162,7 @@ impl_value!(i16, ValueRefEnum::Int16);
 impl_value!(u8, ValueRefEnum::UInt8);
 impl_value!(i8, ValueRefEnum::Int8);
 
-/// An implementation provides Row to Object deserialization interface
+/// An implementation provides Row-to-Object deserialization interface
 /// It's used internally by block iterator
 ///
 /// # Example
@@ -518,7 +536,7 @@ macro_rules! impl_fixed_column {
         }
     };
 }
-
+// FixedColumn implementations
 impl_fixed_column!(u8, ValueRefEnum::UInt8);
 impl_fixed_column!(i8, ValueRefEnum::Int8);
 impl_fixed_column!(u16, ValueRefEnum::UInt16);
@@ -527,7 +545,7 @@ impl_fixed_column!(u32, ValueRefEnum::UInt32);
 impl_fixed_column!(i32, ValueRefEnum::Int32);
 impl_fixed_column!(u64, ValueRefEnum::UInt64);
 impl_fixed_column!(i64, ValueRefEnum::Int64);
-
+#[cfg(feature = "int128")]
 impl_fixed_column!(u128, ValueRefEnum::UInt128);
 
 impl_fixed_column!(f32, ValueRefEnum::Float32);
@@ -539,6 +557,8 @@ impl_fixed_column!(ValueIp6, ValueRefEnum::Ip6);
 
 impl_fixed_column!(ValueDecimal32, ValueRefEnum::Decimal32);
 impl_fixed_column!(ValueDecimal64, ValueRefEnum::Decimal64);
+#[cfg(feature = "int128")]
+impl_fixed_column!(ValueDecimal128, ValueRefEnum::Decimal128);
 
 impl_fixed_column!(ValueDate, ValueRefEnum::Date);
 impl_fixed_column!(ValueDateTime, ValueRefEnum::DateTime);

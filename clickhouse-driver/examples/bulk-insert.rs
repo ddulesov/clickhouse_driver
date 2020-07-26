@@ -6,7 +6,9 @@ use clickhouse_driver::prelude::*;
 use std::{env, io, time};
 
 static NAMES: [&str; 5] = ["one", "two", "three", "four", "five"];
+/// Block size
 const BSIZE: u64 = 10000;
+/// The number of blocks
 const CIRCLE: u64 = 1000;
 
 fn next_block(i: u64) -> Block<'static> {
@@ -45,19 +47,21 @@ async fn main() -> Result<(), io::Error> {
     conn.execute(ddl).await?;
 
     let start = time::Instant::now();
-
-    let mut insert = conn.insert(next_block(0)).await?;
+    let block = next_block(0);
+    let mut insert = conn.insert(&block).await?;
 
     for i in 1u64..CIRCLE {
-        insert.next(next_block(i)).await?;
+        let block = next_block(i);
+        insert.next(&block).await?;
     }
-
+    // Commit at the end
     insert.commit().await?;
     // Stop inserting pipeline before  next query be called
-    drop(insert);
+    // Here it's useless
+    // drop(insert);
 
     eprintln!("elapsed {} msec", start.elapsed().as_millis());
-    eprintln!("{} rows have been inserted", BSIZE * CIRCLE);
+    eprintln!("{} rows have been inserted in \n'{}'", BSIZE * CIRCLE, ddl);
 
     Ok(())
 }

@@ -70,7 +70,7 @@ async fn test_insert_number() -> errors::Result<()> {
             .add("f64", data10)
     };
 
-    let mut insert = conn.insert(block).await?;
+    let mut insert = conn.insert(&block).await?;
     insert.commit().await?;
 
     drop(insert);
@@ -141,7 +141,7 @@ async fn test_insert_enum() -> errors::Result<()> {
        ) ENGINE=MergeTree PARTITION BY id ORDER BY id"#,
     )
     .await?;
-    let mut insert = conn.insert(block).await?;
+    let mut insert = conn.insert(&block).await?;
     for _ in 1u32..100u32 {
         let block = {
             Block::new(table)
@@ -149,7 +149,7 @@ async fn test_insert_enum() -> errors::Result<()> {
                 .add("e8", data_1.clone())
                 .add("e16", data_2.clone())
         };
-        insert.next(block).await?;
+        insert.next(&block).await?;
     }
 
     insert.commit().await?;
@@ -197,7 +197,7 @@ async fn test_insert_nullable() -> errors::Result<()> {
     ) ENGINE=MergeTree PARTITION BY id ORDER BY id"#,
     )
     .await?;
-    let mut insert = conn.insert(block).await?;
+    let mut insert = conn.insert(&block).await?;
     for _ in 1u32..100u32 {
         let block = {
             Block::new(table)
@@ -205,7 +205,7 @@ async fn test_insert_nullable() -> errors::Result<()> {
                 .add_nullable("s", data_1.clone())
                 .add_nullable("i", data_2.clone())
         };
-        insert.next(block).await?;
+        insert.next(&block).await?;
     }
 
     insert.commit().await?;
@@ -254,7 +254,7 @@ async fn test_insert_string() -> errors::Result<()> {
     ) ENGINE=MergeTree PARTITION BY id ORDER BY id"#,
     )
     .await?;
-    let mut insert = conn.insert(block).await?;
+    let mut insert = conn.insert(&block).await?;
     for _ in 1u32..100u32 {
         let block = {
             Block::new(table)
@@ -262,7 +262,7 @@ async fn test_insert_string() -> errors::Result<()> {
                 .add("s", data_1.clone())
                 .add("fs", data_1.clone())
         };
-        insert.next(block).await?;
+        insert.next(&block).await?;
     }
 
     insert.commit().await?;
@@ -316,7 +316,7 @@ async fn test_insert_date() -> errors::Result<()> {
     ) ENGINE=MergeTree PARTITION BY id ORDER BY id"#,
     )
     .await?;
-    let mut insert = conn.insert(block).await?;
+    let mut insert = conn.insert(&block).await?;
     for _ in 1u32..100u32 {
         let block = {
             Block::new(table)
@@ -325,7 +325,7 @@ async fn test_insert_date() -> errors::Result<()> {
                 .add("t1", data_2.clone())
                 .add("t2", data_2.clone())
         };
-        insert.next(block).await?;
+        insert.next(&block).await?;
     }
 
     insert.commit().await?;
@@ -365,14 +365,14 @@ async fn test_insert_uuid() -> errors::Result<()> {
     conn.execute("DROP TABLE IF EXISTS test_insert_uuid")
         .await?;
     conn.execute("CREATE TABLE test_insert_uuid(id UInt64, u UUID ) ENGINE=MergeTree PARTITION BY id ORDER BY id").await?;
-    let mut insert = conn.insert(block).await?;
+    let mut insert = conn.insert(&block).await?;
     for _ in 1u32..100u32 {
         let block = {
             Block::new(table)
                 .add("id", data_0.clone())
                 .add("u", data_1.clone())
         };
-        insert.next(block).await?;
+        insert.next(&block).await?;
     }
 
     insert.commit().await?;
@@ -420,7 +420,7 @@ async fn test_insert_decimal() -> errors::Result<()> {
     ) ENGINE=MergeTree PARTITION BY id ORDER BY id"#,
     )
     .await?;
-    let mut insert = conn.insert(block).await?;
+    let mut insert = conn.insert(&block).await?;
     for _ in 1u32..100u32 {
         let block = {
             Block::new(table)
@@ -428,7 +428,7 @@ async fn test_insert_decimal() -> errors::Result<()> {
                 .add("d32", data_1.clone())
                 .add("d64", data_2.clone())
         };
-        insert.next(block).await?;
+        insert.next(&block).await?;
     }
 
     insert.commit().await?;
@@ -480,7 +480,7 @@ async fn test_insert_ip() -> errors::Result<()> {
     ) ENGINE=MergeTree PARTITION BY id ORDER BY id"#,
     )
     .await?;
-    let mut insert = conn.insert(block).await?;
+    let mut insert = conn.insert(&block).await?;
 
     for _ in 1u32..100u32 {
         let block = {
@@ -489,7 +489,7 @@ async fn test_insert_ip() -> errors::Result<()> {
                 .add("ip4", data_1.clone())
                 .add("ip6", data_2.clone())
         };
-        insert.next(block).await?;
+        insert.next(&block).await?;
     }
 
     insert.commit().await?;

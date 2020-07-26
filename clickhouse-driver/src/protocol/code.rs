@@ -21,8 +21,6 @@ pub const CLIENT_DATA: u64 = 2;
 pub const CLIENT_CANCEL: u64 = 3;
 pub const CLIENT_PING: u64 = 4;
 
-// pub const COMPRESS_ENABLE: u64 = 1;
-// pub const COMPRESS_DISABLE: u64 = 0;
 pub const STATE_COMPLETE: u8 = 2;
 
 // Server message packet types

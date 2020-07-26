@@ -322,7 +322,7 @@ impl AsBlock for EmptyBlock {
 /// columns data (Block) and
 /// Clickhouse server table metadata (   BlockColumnHeader[] )
 pub(super) struct OutputBlockWrapper<'b> {
-    pub(super) inner: Block<'b>,
+    pub(super) inner: &'b Block<'b>,
     pub(super) columns: &'b Vec<BlockColumnHeader>,
 }
 

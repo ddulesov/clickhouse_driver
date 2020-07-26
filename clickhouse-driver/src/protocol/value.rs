@@ -546,14 +546,14 @@ pub struct ValueDateTime(pub [u8; 4]);
 pub struct ValueDateTime64(pub i64);
 
 #[derive(Copy, Clone, Debug)]
-pub struct ValueDecimal32(pub i32, pub u8, pub u8);
+pub struct ValueDecimal32(pub i32);
 
 #[derive(Copy, Clone, Debug)]
-pub struct ValueDecimal64(pub i64, pub u8, pub u8);
+pub struct ValueDecimal64(pub i64);
 
 #[cfg(feature = "int128")]
 #[derive(Copy, Clone, Debug)]
-pub struct ValueDecimal128(pub i128, pub u8, pub u8);
+pub struct ValueDecimal128(pub i128);
 
 impl ValueDate {
     pub(super) fn to_date(&self) -> chrono::Date<chrono::offset::Utc> {

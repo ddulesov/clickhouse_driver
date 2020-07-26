@@ -22,7 +22,9 @@ use crate::compression::LZ4ReadAdapter;
 use crate::errors::{self, DriverError, Exception, Result, ServerError};
 use crate::pool::Options;
 use crate::protocol::decoder::ValueReader;
-use crate::types::{parse_type_field, DecimalBits, Field, SqlType};
+#[cfg(feature = "int128")]
+use crate::types::ValueDecimal128;
+use crate::types::{parse_type_field, DecimalBits, Field, SqlType, ValueDecimal32, ValueDecimal64};
 
 pub(crate) async fn with_timeout<F, T, E>(fut: F, timeout: Duration) -> Result<T>
 where
@@ -314,13 +316,19 @@ where
         }
         SqlType::Decimal(p, _s) => {
             if i32::fit(p) {
-                FixedColumn::<u32>::load_column(reader, rows).await?
+                FixedColumn::<u32>::load_column(reader, rows)
+                    .await?
+                    .cast::<ValueDecimal32>()
             } else if i64::fit(p) {
-                FixedColumn::<u64>::load_column(reader, rows).await?
+                FixedColumn::<u64>::load_column(reader, rows)
+                    .await?
+                    .cast::<ValueDecimal64>()
             } else {
                 #[cfg(feature = "int128")]
                 if i128::fit(p) {
-                    FixedColumn::<u128>::load_column(reader, rows).await?
+                    FixedColumn::<u128>::load_column(reader, rows)
+                        .await?
+                        .cast::<ValueDecimal128>()
                 }
                 return Err(DriverError::UnsupportedType(field.sql_type).into());
             }
