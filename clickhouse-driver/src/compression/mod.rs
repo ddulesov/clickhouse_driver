@@ -152,6 +152,8 @@ impl<R: AsyncBufRead + Unpin> LZ4ReadAdapter<R> {
                             let mut cursor = io::Cursor::new(buf);
                             let code: u8 = cursor.read_u8().unwrap();
                             if code != LZ4_COMPRESSION_METHOD {
+                                //println!("compression {:?}", cursor.into_inner());
+
                                 return Poll::Ready(Err(io::Error::new(
                                     io::ErrorKind::InvalidData,
                                     DriverError::BadCompressedPacketHeader,

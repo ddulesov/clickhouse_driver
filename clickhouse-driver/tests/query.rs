@@ -117,6 +117,24 @@ async fn test_query_nullable() -> errors::Result<()> {
 }
 
 #[tokio::test]
+async fn test_query_lowcardinality() -> errors::Result<()> {
+    let pool = get_pool();
+    let mut conn = pool.connection().await?;
+
+    let mut query_result = conn.query("SELECT lcs FROM main WHERE lcs='May' LIMIT 1000").await?;
+
+    while let Some(block) = query_result.next().await? {
+        for row in block.iter_rows() {
+            let lcs: &str = row.value(0)?.unwrap();
+            assert_eq!(lcs, "May");
+        }
+    }
+    drop(query_result);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_query_deserialize() -> errors::Result<()> {
     let pool = get_pool();
     let mut conn = pool.connection().await?;

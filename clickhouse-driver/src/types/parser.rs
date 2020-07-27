@@ -257,7 +257,7 @@ fn parse_type_flags(t: &str) -> (u8, &str) {
     };
     let t = if t.starts_with("LowCardinality(") && t.ends_with(')') {
         flag |= FIELD_LOWCARDINALITY;
-        &t[9..t.len() - 1]
+        &t[15..t.len() - 1]
     } else {
         t
     };

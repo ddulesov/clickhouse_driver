@@ -16,6 +16,7 @@ use super::value::{ValueDate, ValueDateTime, ValueDateTime64, ValueIp4, ValueIp6
 use super::{CompressionMethod, ServerInfo};
 use crate::compression::LZ4ReadAdapter;
 use crate::errors::{self, DriverError, Exception, Result, ServerError};
+use crate::protocol::column::{BoxString, LowCardinalityColumn};
 use crate::protocol::decoder::ValueReader;
 #[cfg(feature = "int128")]
 use crate::types::ValueDecimal128;
@@ -26,6 +27,11 @@ macro_rules! err {
         Err($err.into())
     };
 }
+
+const SHARED_WITH_ADDITIONAL_KEY: u64 = 0x0001;
+const GLOBAL_DICTIONARY: u64 = 0x0100;
+const ADDITIONAL_KEY: u64 = 0x0200;
+//const UPDATE_KEY: u64 = 0x0400;
 
 pub(crate) async fn with_timeout<F, T, E>(fut: F, timeout: Duration) -> Result<T>
 where
@@ -221,7 +227,7 @@ where
     rdr.read_vint().await?; //skip n1
     rdr.as_mut().read_exact(&mut b[0..1]).await?;
     let overflow: bool = b[0] != 0;
-    rdr.read_vint().await?; //skip n2
+    rdr.read_vint().await?;
     rdr.as_mut().read_exact(&mut b[..]).await?;
     rdr.read_vint().await?; //skip n3
 
@@ -254,11 +260,52 @@ pub(crate) async fn load_nulls<R: AsyncBufRead + Unpin>(
 }
 
 async fn load_lowcardinality_string<R>(
-    _reader: R,
+    mut reader: R,
     _field: &Field,
-    _rows: u64,
-) -> Result<Box<dyn AsInColumn>> {
-    err!(DriverError::UnsupportedType(SqlType::LowCardinality))
+    rows: u64,
+) -> Result<Box<dyn AsInColumn>>
+where
+    R: AsyncBufRead + Unpin,
+{
+    if rows == 0 {
+        return Ok(Box::new(LowCardinalityColumn::<u8>::empty()));
+    }
+    // read version number
+    let mut v: u64 = reader.read_u64_le().await?;
+
+    if v != SHARED_WITH_ADDITIONAL_KEY {
+        return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
+    }
+    // read serialization type
+    v = reader.read_u64_le().await?;
+
+    if v & GLOBAL_DICTIONARY == GLOBAL_DICTIONARY {
+        return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
+    }
+    if v & ADDITIONAL_KEY == 0 {
+        return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
+    }
+    let index_type: u8 = v as u8 & 0x0F;
+    // read number of keys
+    v = reader.read_u64_le().await?;
+
+    let keys: FixedColumn<BoxString> =
+        FixedColumn::load_string_column(reader.borrow_mut(), v as u64).await?;
+    // read number of values
+    v = reader.read_u64_le().await?;
+    if v != rows {
+        return err!(DriverError::BrokenData);
+    }
+
+    match index_type {
+        0 => LowCardinalityColumn::<u8>::load_column(reader, rows, keys).await,
+        1 => LowCardinalityColumn::<u16>::load_column(reader, rows, keys).await,
+        2 => LowCardinalityColumn::<u32>::load_column(reader, rows, keys).await,
+        3 => LowCardinalityColumn::<u64>::load_column(reader, rows, keys).await,
+        _ => err!(DriverError::BrokenData),
+    }
+
+    //return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
 }
 
 async fn load_column<R>(mut reader: R, field: &Field, rows: u64) -> Result<Box<dyn AsInColumn>>

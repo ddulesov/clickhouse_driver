@@ -105,7 +105,7 @@ pub mod value;
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 /// At the moment we support only LZ4 compression method
-/// It's used by default by Clickhouse 20.x
+/// It's used by default Clickhouse 20.x
 pub enum CompressionMethod {
     None,
     LZ4,
@@ -128,6 +128,10 @@ pub(crate) trait ServerWriter {
 #[derive(Debug)]
 pub enum ValueRefEnum<'a> {
     String(&'a [u8]),
+    //Array8(&'a [u8] ),
+    //Array16(&'a [u16]),
+    //Array32(&'a [u32]),
+    //Array64(&'a [u64]),
     UInt8(u8),
     UInt16(u16),
     UInt32(u32),
@@ -208,7 +212,10 @@ mod test {
         let valueref_size = size_of::<ValueRef>();
         let valuerefenum_size = size_of::<ValueRefEnum>();
 
-        //println!("size of valueref:{} valuerefenum:{}", valueref_size, valuerefenum_size);
         assert_eq!(valueref_size, valuerefenum_size);
+        assert!(
+            valueref_size <= 24,
+            "ValueRef should be smaller than 32 bytes. 16 bytes - data + 8 bytes descriptor"
+        );
     }
 }

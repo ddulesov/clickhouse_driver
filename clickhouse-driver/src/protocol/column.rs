@@ -26,7 +26,14 @@ use crate::types::Decimal128;
 use crate::types::{Decimal, Decimal32, Decimal64, Field, FieldMeta, SqlType};
 
 use std::cmp::Ordering;
+use std::convert::{TryFrom, TryInto};
 use std::fmt::Formatter;
+
+macro_rules! err {
+    ($err: expr) => {
+        Err($err.into())
+    };
+}
 
 pub trait AsOutColumn {
     fn len(&self) -> usize;
@@ -61,14 +68,14 @@ impl<'a> Value<'a, DateTime<Utc>> for ValueRef<'a> {
                     Ok(Some(v.to_datetime(p)))
                 } else {
                     // TODO: Apparently not reachable. Replace it with notreachable!
-                    Err(ConversionError::UnsupportedConversion.into())
+                    err!(ConversionError::UnsupportedConversion)
                 }
             }
             Some(ValueRefEnum::Date(v)) => {
                 let d = v.to_date();
                 Ok(Some(d.and_hms(0, 0, 0)))
             }
-            _ => Err(ConversionError::UnsupportedConversion.into()),
+            _ => err!(ConversionError::UnsupportedConversion),
         }
     }
 }
@@ -82,7 +89,7 @@ impl<'a> Value<'a, &'a str> for ValueRef<'a> {
                 let title = v.transcode(meta);
                 Ok(Some(from_utf8(title)?))
             }
-            _ => Err(ConversionError::UnsupportedConversion.into()),
+            _ => err!(ConversionError::UnsupportedConversion),
         }
     }
 }
@@ -97,7 +104,7 @@ impl<'a> Value<'a, &'a [u8]> for ValueRef<'a> {
                 let title = v.transcode(meta);
                 Ok(Some(title))
             }
-            _ => Err(ConversionError::UnsupportedConversion.into()),
+            _ => err!(ConversionError::UnsupportedConversion),
         }
     }
 }
@@ -118,7 +125,7 @@ impl<'a> Value<'a, Decimal32> for ValueRef<'a> {
                 let scale = decimal_scale_from_field(field);
                 Ok(Some(Decimal::from(v.0, scale)))
             }
-            _ => Err(ConversionError::UnsupportedConversion.into()),
+            _ => err!(ConversionError::UnsupportedConversion),
         }
     }
 }
@@ -130,7 +137,7 @@ impl<'a> Value<'a, Decimal64> for ValueRef<'a> {
                 let scale = decimal_scale_from_field(field);
                 Ok(Some(Decimal::from(v.0, scale)))
             }
-            _ => Err(ConversionError::UnsupportedConversion.into()),
+            _ => err!(ConversionError::UnsupportedConversion),
         }
     }
 }
@@ -143,7 +150,7 @@ impl<'a> Value<'a, Decimal128> for ValueRef<'a> {
                 let scale = decimal_scale_from_field(field);
                 Ok(Some(Decimal::from(v.0, scale)))
             }
-            _ => Err(ConversionError::UnsupportedConversion.into()),
+            _ => err!(ConversionError::UnsupportedConversion),
         }
     }
 }
@@ -155,7 +162,7 @@ macro_rules! impl_value {
                 match self.inner {
                     Some($vr(v)) => Ok(Some(v.into())),
                     None => Ok(None),
-                    _ => Err(ConversionError::UnsupportedConversion.into()),
+                    _ => err!(ConversionError::UnsupportedConversion),
                 }
             }
         }
@@ -308,7 +315,7 @@ impl<'a, C: AsInColumn + ?Sized + 'a> AsInColumn for Box<C> {
     }
 }
 
-type BoxString = Box<[u8]>;
+pub(crate) type BoxString = Box<[u8]>;
 /*
 /// Column of String, FixedString
 pub(crate) struct StringColumn {
@@ -577,7 +584,7 @@ impl<T: Sized> FixedColumn<T> {
     pub(crate) async fn load_column<R: AsyncBufRead + Unpin>(
         mut reader: R,
         rows: u64,
-    ) -> Result<Box<FixedColumn<T>>> {
+    ) -> Result<FixedColumn<T>> {
         let mut data: Vec<T> = Vec::with_capacity(rows as usize);
 
         unsafe {
@@ -585,7 +592,7 @@ impl<T: Sized> FixedColumn<T> {
             reader.read_exact(as_bytes_bufer_mut(&mut data)).await?;
         }
 
-        Ok(Box::new(FixedColumn { data }))
+        Ok(FixedColumn { data })
     }
 
     pub(crate) fn cast<U: Sized>(self: FixedColumn<T>) -> FixedColumn<U> {
@@ -605,7 +612,7 @@ impl<T: Sized> FixedColumn<T> {
     }
 }
 
-impl<T: 'static> FixedColumn<T>
+impl<T: Sized + 'static> FixedColumn<T>
 where
     FixedNullColumn<T>: AsInColumn,
     FixedColumn<T>: AsInColumn,
@@ -646,6 +653,91 @@ macro_rules! impl_fixed_column {
         }
     };
 }
+#[allow(dead_code)]
+pub(crate) struct FixedArrayColumn<T> {
+    data: Vec<T>,
+    index: Vec<usize>,
+    //phantom: PhantomData<T>
+}
+
+impl<T: Send> AsInColumn for FixedArrayColumn<T> {
+    unsafe fn get_at(&self, index: u64) -> ValueRef<'_> {
+        let size1 = if index == 0 {
+            0_usize
+        } else {
+            *self.index.get_unchecked((index - 1) as usize)
+        };
+
+        let size2 = *self.index.get_unchecked(index as usize);
+        debug_assert!(size1 <= size2);
+
+        ValueRef {
+            //inner: Some( ValueRefEnum::Array( &self.data[size1..size2] ) )
+            inner: None,
+        }
+    }
+}
+
+pub(crate) struct LowCardinalityColumn<T: Sized + Send> {
+    values: Vec<BoxString>,
+    data: Vec<T>,
+}
+// TODO: rewrite for 32-bit system
+impl<T> LowCardinalityColumn<T>
+where
+    T: Sized + Ord + Copy + Send + 'static,
+    usize: TryFrom<T>,
+{
+    pub(crate) fn empty() -> Box<dyn AsInColumn> {
+        Box::new(LowCardinalityColumn {
+            values: Vec::new(),
+            data: Vec::<u8>::new(),
+        })
+    }
+
+    pub(crate) async fn load_column<R>(
+        reader: R,
+        rows: u64,
+        values: FixedColumn<BoxString>,
+    ) -> Result<Box<dyn AsInColumn>>
+    where
+        R: AsyncBufRead + Unpin,
+    {
+        let data: FixedColumn<T> = FixedColumn::load_column(reader, rows).await?;
+
+        let m = data
+            .data
+            .iter()
+            .max()
+            .expect("corrupted lowcardinality column");
+        let m: usize = (*m).try_into().unwrap_or_else(|_| 0);
+        if m >= values.data.len() {
+            return err!(DriverError::IntegrityError);
+        }
+
+        Ok(Box::new(LowCardinalityColumn {
+            data: data.data,
+            values: values.data,
+        }))
+    }
+}
+
+impl<T: Copy + Send + Sized + TryInto<usize>> AsInColumn for LowCardinalityColumn<T> {
+    unsafe fn get_at(&self, index: u64) -> ValueRef<'_> {
+        debug_assert!((index as usize) < self.data.len());
+        let index = self.data.get_unchecked(index as usize);
+        let index: usize = (*index).try_into().unwrap_or_else(|_| 0);
+        if index == 0 {
+            ValueRef { inner: None }
+        } else {
+            let v = self.values.get_unchecked(index);
+            ValueRef {
+                inner: Some(ValueRefEnum::String(v)),
+            }
+        }
+    }
+}
+
 // FixedColumn implementations
 impl_fixed_column!(u8, ValueRefEnum::UInt8);
 impl_fixed_column!(i8, ValueRefEnum::Int8);
