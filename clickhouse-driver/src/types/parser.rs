@@ -7,6 +7,7 @@
 use super::{Field, FieldMeta, SqlType};
 use crate::errors::{self, ConversionError, DriverError, Result};
 use crate::protocol::column::EnumIndex;
+use crate::types::{FIELD_ARRAY, FIELD_LOWCARDINALITY, FIELD_NONE, FIELD_NULLABLE};
 use chrono_tz::Tz;
 use std::fmt::{Debug, Formatter};
 use std::str::FromStr;
@@ -38,7 +39,7 @@ macro_rules! field {
     ($sql_type: expr) => {
         Ok(Field {
             sql_type: $sql_type,
-            nullable: false,
+            flag: FIELD_NONE,
             meta: None,
         })
     };
@@ -130,7 +131,7 @@ impl<'a> EnumParser<'a> {
             index.sort_unstable_by_key(EnumIndex::fn_sort_val);
             Ok(Field {
                 sql_type,
-                nullable: false,
+                flag: FIELD_NONE,
                 meta: Some(FieldMeta { index }),
             })
         } else {
@@ -244,21 +245,38 @@ impl DateTimeParser {
     }
 }
 
-pub fn parse_type_field(t: &str) -> Result<Field> {
-    let (nullable, t) = if t.starts_with("Nullable(") && t.ends_with(')') {
-        (true, &t[9..t.len() - 1])
-    } else {
-        // if t.starts_with("LowCardinality(") && t.ends_with(')') {
-        //
-        // }
-        (false, t)
-    };
+#[inline]
+fn parse_type_flags(t: &str) -> (u8, &str) {
+    let mut flag: u8 = 0;
 
+    let t = if t.starts_with("Nullable(") && t.ends_with(')') {
+        flag |= FIELD_NULLABLE;
+        &t[9..t.len() - 1]
+    } else {
+        t
+    };
+    let t = if t.starts_with("LowCardinality(") && t.ends_with(')') {
+        flag |= FIELD_LOWCARDINALITY;
+        &t[9..t.len() - 1]
+    } else {
+        t
+    };
+    let t = if t.starts_with("Array(") && t.ends_with(')') {
+        flag |= FIELD_ARRAY;
+        &t[9..t.len() - 1]
+    } else {
+        t
+    };
+    (flag, t)
+}
+
+pub fn parse_type_field(t: &str) -> Result<Field> {
+    let (flag, t) = parse_type_flags(t);
     macro_rules! field {
         ($sql_type: expr) => {
             Ok(Field {
                 sql_type: $sql_type,
-                nullable,
+                flag,
                 meta: None,
             })
         };
@@ -294,15 +312,15 @@ pub fn parse_type_field(t: &str) -> Result<Field> {
         return field!(SqlType::Ipv6);
     } else if t.starts_with("Decimal") {
         let mut field = DecimalParser::parse_str(t)?;
-        field.nullable = nullable;
+        field.flag = flag;
         return Ok(field);
     } else if t.starts_with("Enum") {
         let mut field = EnumParser::parse_str(t)?;
-        field.nullable = nullable;
+        field.flag = flag;
         return Ok(field);
     } else if t.starts_with("Date") {
         let mut field = DateTimeParser::parse_str(t)?;
-        field.nullable = nullable;
+        field.flag = flag;
         return Ok(field);
     } else if t.starts_with("FixedString(") {
         if let Ok(sz) = u32::from_str(&t[12..t.len() - 1]) {

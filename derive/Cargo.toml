@@ -1,9 +1,9 @@
 [package]
-name = "clickhouse-derive"
+name = "clickhouse-driver-derive"
 version = "0.1.1"
+description = "Derive macros for ClickHouse Asynchronous Driver."
 authors = ["Dmitry Dulesov <dmitry.dulesov@gmail.com>"]
 edition = "2018"
-
 
 [dependencies]
 syn = "1.0.31"

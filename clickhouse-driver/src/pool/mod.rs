@@ -57,10 +57,6 @@ pub(crate) struct Inner {
     wait: atomic::AtomicUsize,
     /// Pool status flag
     close: atomic::AtomicI8,
-    //disconnect: Option<Waker>,
-
-    // min: u16,
-    // max: u16,
 }
 
 impl Inner {

@@ -4,7 +4,7 @@
 
 Asynchronous tokio-based pure rust Clickhouse client library 
  
-*current status: alpha,  NOT PRODUCTION-READY* 
+*current status: alpha* 
 
 ### Why ###
 
@@ -28,22 +28,25 @@ Asynchronous tokio-based pure rust Clickhouse client library
 * Decimal - read/write
 * Enum8, Enum16 - read/write
 
-### In the future
-
-* Array - not supported yet
-* Tuple - not supported yet
-* AggregateFunction - not supported
-* LowCardinality - not supported
-
 ### Use cases ###
 
 * Make query using SQL syntax supported by Clickhouse Server 
 * Execute arbitrary DDL commands  
 * Query Server status
 * Insert into Clickhouse Server big (possibly continues ) data stream
-* Load-balancing using round-robin algorithm
+* Load-balancing using round-robin method
 
 ### Quick start ###
+The package has not published in crates.io.
+Download source from [home git](https://github.com/ddulesov/clickhouse_driver)
+
+- Add dependencies to Cargo.toml 
+
+  clickhouse-driver = { version="0.1.0-alpha.1", path="../path_to_package"}
+
+- Add usage in main.rs
+
+  use clickhouse_driver::prelude::*;
 
 to connect to server provide connection url 
 ```
@@ -114,8 +117,41 @@ Examples:
  - `200ms`  ( 200 mseconds )
  - `20`     ( 20 seconds )
  - `10s`    ( 10 seconds )
+ 
 ### Example
 ```rust  
+
+struct Blob {
+    id: u64,
+    url: String,
+    date: ServerDate,
+    client: Uuid,
+    ip: Ipv4Addr,
+    value: Decimal32,
+}
+
+impl Deserialize for Blob {
+    fn deserialize(row: Row) -> errors::Result<Self> {
+        let err = || errors::ConversionError::UnsupportedConversion;
+
+        let id: u64 = row.value(0)?.ok_or_else(err)?;
+        let url: &str = row.value(1)?.ok_or_else(err)?;
+        let date: ServerDate = row.value(2)?.ok_or_else(err)?;
+        let client: Uuid = row.value(3)?.ok_or_else(err)?;
+        let ip = row.value(4)?.ok_or_else(err)?;
+        let value: Decimal32 = row.value(5)?.ok_or_else(err)?;
+
+        Ok(Blob {
+            id,
+            date,
+            client,
+            value,
+            url: url.to_string(),
+            ip,
+        })
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), io::Error> {
 
@@ -150,13 +186,13 @@ async fn main() -> Result<(), io::Error> {
 }
 ```
 
-*More examples see in clickhouse-driver/examples/ directory*
+* For more examples see clickhouse-driver/examples/ directory*
 
 ### Known issues and limitations ###
 
 * Doesn't support Array data type, LowCardinality
 * Insert method support only limited data types 
-  `insert` requires that data type matches table column type
+  `insert` requires that inserted data  exactly matches table column type
    - Int8(16|32|64)  - i8(16|32|64)
    - UInt8(16|32|64) - u8(16|32|64)
    - Float32 - f32
@@ -169,6 +205,12 @@ async fn main() -> Result<(), io::Error> {
    - String - &str or String or &[u8]
    - Enum8|16 - &str or String
    
+### In the future
+
+* Array column data type - not supported yet
+* Tuple - not supported yet
+* AggregateFunction - not supported
+* LowCardinality - not supported   
     
    
    

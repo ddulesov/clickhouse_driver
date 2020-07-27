@@ -7,10 +7,12 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use tokio::io::{AsyncBufRead, AsyncRead};
 
 #[cfg(not(feature = "cityhash_rs"))]
-use clickhouse_cityhash::city_hash_128;
+use clickhouse_driver_cth::city_hash_128;
 #[cfg(feature = "cityhash_rs")]
-use clickhouse_cityhash_rs::city_hash_128;
-pub use lz4a::{LZ4_Compress, LZ4_CompressBounds, LZ4_Decompress, LZ4_compress_default};
+use clickhouse_driver_cthrs::city_hash_128;
+pub use clickhouse_driver_lz4::{
+    LZ4_Compress, LZ4_CompressBounds, LZ4_Decompress, LZ4_compress_default,
+};
 
 use crate::errors;
 use crate::errors::DriverError;

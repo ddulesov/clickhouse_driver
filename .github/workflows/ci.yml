@@ -34,3 +34,7 @@ jobs:
       run: cargo clippy --all-targets
     - name: Run Tests
       run: cargo test --all 
+    - name: Int128 Build
+      run: |
+        cd clickhouse-driver
+        cargo build --no-default-features --features 'cityhash int128'

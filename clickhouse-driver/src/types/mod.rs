@@ -1,3 +1,5 @@
+#[cfg(feature = "int128")]
+pub use crate::protocol::value::ValueDecimal128;
 pub use crate::protocol::value::{
     ValueDate, ValueDateTime, ValueDateTime64, ValueDecimal32, ValueDecimal64, ValueIp4, ValueIp6,
     ValueUuid,
@@ -55,9 +57,14 @@ impl FieldMeta {
     }
 }
 
+pub const FIELD_NONE: u8 = 0x00;
+pub const FIELD_NULLABLE: u8 = 0x01;
+pub const FIELD_LOWCARDINALITY: u8 = 0x02;
+pub const FIELD_ARRAY: u8 = 0x04;
+
 pub struct Field {
     pub(crate) sql_type: SqlType,
-    pub(crate) nullable: bool,
+    pub(crate) flag: u8,
     meta: Option<FieldMeta>,
 }
 
@@ -65,7 +72,7 @@ impl Clone for Field {
     fn clone(&self) -> Self {
         Field {
             sql_type: self.sql_type,
-            nullable: self.nullable,
+            flag: self.flag,
             meta: {
                 match &self.meta {
                     None => None,
@@ -84,6 +91,19 @@ impl Field {
     }
     pub fn get_meta_mut(&mut self) -> Option<&mut FieldMeta> {
         self.meta.as_mut()
+    }
+
+    #[inline]
+    pub fn is_nullable(&self) -> bool {
+        (self.flag & FIELD_NULLABLE) == FIELD_NULLABLE
+    }
+    #[inline]
+    pub fn is_array(&self) -> bool {
+        (self.flag & FIELD_ARRAY) == FIELD_ARRAY
+    }
+    #[inline]
+    pub fn is_lowcardinality(&self) -> bool {
+        (self.flag & FIELD_LOWCARDINALITY) == FIELD_LOWCARDINALITY
     }
 
     fn write_enum(meta: &FieldMeta, writer: &mut dyn Write) -> io::Result<()> {
@@ -106,7 +126,7 @@ impl Encoder for Field {
     fn encode(&self, writer: &mut dyn Write) -> io::Result<()> {
         let mut type_adapter = StringEncoderAdapter::new(writer);
 
-        if self.nullable {
+        if self.is_nullable() {
             write!(type_adapter, "Nullable(")?;
         };
 
@@ -119,7 +139,7 @@ impl Encoder for Field {
             )?;
         }
 
-        if self.nullable {
+        if self.is_nullable() {
             write!(type_adapter, ")")?;
         };
         Ok(())
@@ -146,10 +166,12 @@ pub enum SqlType {
     Ipv4,
     Ipv6,
     Uuid,
-    Array,
     Decimal(u8, u8),
     Enum8,
     Enum16,
+    // type placeholders
+    Array,
+    LowCardinality,
 }
 
 impl fmt::Display for SqlType {
@@ -210,7 +232,7 @@ mod test {
     use super::Field;
     use crate::protocol::column::EnumIndex;
     use crate::protocol::encoder::Encoder;
-    use crate::types::{FieldMeta, SqlType};
+    use crate::types::{FieldMeta, SqlType, FIELD_NONE};
 
     macro_rules! into_boxed {
         ($s: expr) => {
@@ -228,7 +250,7 @@ mod test {
         let mut buf = Vec::new();
         let f = Field {
             sql_type: SqlType::String,
-            nullable: false,
+            flag: FIELD_NONE,
             meta: None,
         };
 
@@ -240,7 +262,7 @@ mod test {
         let mut buf = Vec::new();
         let f = Field {
             sql_type: SqlType::String,
-            nullable: true,
+            flag: FIELD_NONE,
             meta: None,
         };
         f.encode(&mut buf).unwrap();
@@ -252,7 +274,7 @@ mod test {
         let mut buf = Vec::new();
         let f = Field {
             sql_type: SqlType::FixedString(20),
-            nullable: true,
+            flag: FIELD_NONE,
             meta: None,
         };
         f.encode(&mut buf).unwrap();
@@ -260,7 +282,7 @@ mod test {
         buf.clear();
         let f = Field {
             sql_type: SqlType::Decimal(18, 4),
-            nullable: true,
+            flag: FIELD_NONE,
             meta: None,
         };
         f.encode(&mut buf).unwrap();
@@ -276,7 +298,7 @@ mod test {
         ];
         let f = Field {
             sql_type: SqlType::Enum8,
-            nullable: false,
+            flag: FIELD_NONE,
             meta: Some(FieldMeta { index }),
         };
         f.encode(&mut buf).unwrap();

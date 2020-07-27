@@ -2,7 +2,7 @@
 #![allow(arithmetic_overflow)]
 #![allow(clippy::many_single_char_names)]
 #[cfg(test)]
-extern crate clickhouse_cityhash;
+extern crate clickhouse_driver_cth;
 #[cfg(test)]
 extern crate std;
 
@@ -297,7 +297,7 @@ pub fn city_hash_128(src: &[u8]) -> Pair {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clickhouse_cityhash::{_CityHash128, _CityMurmur, c_char, Hash128};
+    use clickhouse_driver_cth::{_CityHash128, _CityMurmur, c_char, Hash128};
     use std::vec::Vec;
 
     fn city_hash_ref(source: &[u8]) -> Pair {

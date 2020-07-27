@@ -5,10 +5,10 @@ use std::time::Duration;
 
 use crate::pool::Inner as InnerPool;
 use crate::protocol::block::{Block, ServerBlock};
-use crate::protocol::command::{Command, CommandSink, Execute, ResponseStream};
-use crate::protocol::command::{Hello, Ping};
+use crate::protocol::command::{CommandSink, ResponseStream};
 use crate::protocol::insert::InsertSink;
 use crate::protocol::packet::Response;
+use crate::protocol::packet::{Command, Execute, Hello, Ping};
 use crate::protocol::query::Query;
 use crate::protocol::{CompressionMethod, ServerWriter};
 use crate::{

@@ -12,7 +12,7 @@ use super::value::IntoColumn;
 use super::ServerWriter;
 use crate::client::ServerInfo;
 use crate::compression::LZ4CompressionWrapper;
-use crate::types::Field;
+use crate::types::{Field, FIELD_NONE, FIELD_NULLABLE};
 use chrono_tz::Tz;
 
 pub struct RowIterator<'a> {
@@ -155,7 +155,7 @@ impl<'b> Block<'b> {
 
         self.columns.push(ColumnDataAdapter {
             name,
-            nullable: false,
+            flag: FIELD_NONE,
             data: IntoColumn::to_column(data),
         });
         self
@@ -172,7 +172,7 @@ impl<'b> Block<'b> {
 
         self.columns.push(ColumnDataAdapter {
             name,
-            nullable: true,
+            flag: FIELD_NULLABLE,
             data: IntoColumn::to_column(data),
         });
         self
@@ -205,7 +205,7 @@ impl fmt::Debug for BlockColumnHeader {
 pub struct BlockColumn {
     pub(crate) header: BlockColumnHeader,
     pub(crate) data: Box<dyn AsInColumn>,
-    pub(crate) nulls: Option<Vec<u8>>,
+    //pub(crate) nulls: Option<Vec<u8>>,
 }
 
 impl BlockColumn {

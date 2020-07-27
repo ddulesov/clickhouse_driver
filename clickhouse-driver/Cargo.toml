@@ -1,5 +1,5 @@
 [package]
-name = "clickhouse_driver"
+name = "clickhouse-driver"
 description = "Asynchronous tokio-based Yandex ClickHouse driver."
 version = "0.1.0-alpha.1"
 license = "MIT"
@@ -12,10 +12,10 @@ categories = ["database"]
 exclude = ["tests/*", "examples/*"]
 
 [dependencies]
-clickhouse-cityhash = { version="0.1.0", path="../cityhash", optional=true}
-clickhouse-cityhash-rs = { version="0.1.0", path="../cityhash-rs", optional=true}
-clickhouse-derive = { version="0.1.0", path="../derive"}
-lz4a = { version="0.1.0", path="../lz4a" }
+clickhouse-driver-cth = { version="0.1.0", path="../cityhash", optional=true}
+clickhouse-driver-cthrs = { version="0.1.0", path="../cityhash-rs", optional=true}
+clickhouse-driver-lz4 = { version="0.1.0", path="../lz4a" }
+
 thiserror = { version="1.0" }
 log = { version="0.4.8" }
 url = { version="^2" }
@@ -37,8 +37,8 @@ bytes={ version="^0.5" }
 [features]
 default = ["cityhash_rs"]
 tls = ["tokio-native-tls"]
-cityhash_rs = ["clickhouse-cityhash-rs"]
-cityhash = ["clickhouse-cityhash"]
+cityhash_rs = ["clickhouse-driver-cthrs"]
+cityhash = ["clickhouse-driver-cth"]
 recycle = []
 int128 = []
 
@@ -62,6 +62,3 @@ name = "query"
 
 [[test]]
 name = "insert"
-
-
-

@@ -3,3 +3,11 @@
 members = [
     "clickhouse-driver","cityhash","lz4a","derive","cityhash-rs"
 ]
+
+[profile.release]
+opt-level = 3
+overflow-checks = false
+
+[profile.bench]
+opt-level = 3
+overflow-checks = false

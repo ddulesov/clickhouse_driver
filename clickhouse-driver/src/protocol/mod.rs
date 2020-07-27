@@ -143,6 +143,7 @@ pub enum ValueRefEnum<'a> {
     Date(ValueDate),
     DateTime(ValueDateTime),
     DateTime64(ValueDateTime64),
+    Enum(i16),
     Ip4(ValueIp4),
     Ip6(ValueIp6),
     Uuid(ValueUuid),
@@ -161,8 +162,10 @@ pub trait Value<'a, T: 'a> {
 
 #[cfg(test)]
 mod test {
-    use crate::protocol::column::EnumIndex;
+    use super::ValueRefEnum;
+    use crate::protocol::column::{EnumIndex, ValueRef};
     use crate::types::FieldMeta;
+    use std::mem::size_of;
 
     macro_rules! into_boxed {
         ($s: expr) => {
@@ -198,5 +201,14 @@ mod test {
         assert_eq!(meta.str2val(b"unknown").unwrap(), -2i16);
         assert_eq!(meta.str2val(b"n/a").unwrap(), -1i16);
         assert!(meta.str2val(b"some other").is_err());
+    }
+
+    #[test]
+    fn test_valueref_size() {
+        let valueref_size = size_of::<ValueRef>();
+        let valuerefenum_size = size_of::<ValueRefEnum>();
+
+        //println!("size of valueref:{} valuerefenum:{}", valueref_size, valuerefenum_size);
+        assert_eq!(valueref_size, valuerefenum_size);
     }
 }

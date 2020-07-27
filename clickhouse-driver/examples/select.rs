@@ -46,7 +46,10 @@ async fn main() -> Result<(), io::Error> {
     {
         let mut start = time::Instant::now();
         let mut conn = pool.connection().await?;
-        eprintln!("connection establish {} msec", start.elapsed().as_millis());
+        eprintln!(
+            "connection establish in {} msec",
+            start.elapsed().as_millis()
+        );
         start = time::Instant::now();
 
         let mut result = conn.query("SELECT id, name, dt FROM perf").await?;
@@ -57,7 +60,7 @@ async fn main() -> Result<(), io::Error> {
                 sum += item.id as u64;
             }
         }
-        eprintln!("fetch block {} msec", start.elapsed().as_millis());
+        eprintln!("fetch blocks in {} msec", start.elapsed().as_millis());
         eprintln!("{}", sum);
     }
 

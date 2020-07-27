@@ -3,19 +3,19 @@ extern crate byteorder;
 extern crate chrono;
 extern crate chrono_tz;
 #[cfg(not(feature = "cityhash_rs"))]
-extern crate clickhouse_cityhash;
+extern crate clickhouse_driver_cth;
 #[cfg(feature = "cityhash_rs")]
-extern crate clickhouse_cityhash_rs;
-extern crate clickhouse_derive;
+extern crate clickhouse_driver_cthrs;
+
 extern crate core;
 #[macro_use]
 extern crate futures;
 extern crate hostname;
 #[macro_use]
 extern crate lazy_static;
-extern crate log;
 #[cfg(lz4)]
-extern crate lz4a;
+extern crate clickhouse_driver_lz4a;
+extern crate log;
 #[cfg(test)]
 extern crate rand;
 extern crate thiserror;
@@ -34,6 +34,7 @@ mod compression;
 mod errors;
 mod pool;
 pub mod prelude;
+#[macro_use]
 mod protocol;
 mod types;
 

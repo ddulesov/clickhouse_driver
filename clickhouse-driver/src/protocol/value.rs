@@ -68,6 +68,8 @@ macro_rules! impl_null {
         }
     };
 }
+
+// Null value placeholder
 impl_null!(u8, 0u8);
 impl_null!(i8, 0i8);
 impl_null!(u16, 0u16);
@@ -100,8 +102,11 @@ where
         self.data.len()
     }
     /// Encodes null flags then encode data
-    /// Null values are encoded as ordinary replaced by result of NullValue::null()
+    /// Null values are encoded as ordinary ones received by calling NullValue::null()
     fn encode(&self, field: &Field, writer: &mut dyn Write) -> Result<()> {
+        // TODO: Compare a performance with single pass encoder.
+        // Here we iterate over data twice. We have to do it because nulls are serialized first.
+        // However we can serialize values in second buffer and then append it to the output stream
         for item in self
             .data
             .iter()
@@ -121,7 +126,8 @@ where
     }
 }
 
-/// Default (used by nullable string) implementation
+/// Default string encoder implementation
+/// It's used by nullable string
 impl ToColumn for &str {
     #[inline]
     fn to_column(&self, field: &Field, writer: &mut dyn Write) -> Result<()> {
@@ -145,7 +151,7 @@ impl ToColumn for String {
     }
 }
 
-/// Encode string array. Column `String` `Native Format`
+/// Encode string array. Column `String` in `Native Format`
 /// |StringLength as VarInt (0..9 bytes)|String byte array  | ... next item
 fn encode_string<T: AsRef<[u8]>>(data: &[T], writer: &mut dyn Write) -> Result<()> {
     for s in data {
@@ -155,7 +161,7 @@ fn encode_string<T: AsRef<[u8]>>(data: &[T], writer: &mut dyn Write) -> Result<(
     }
     Ok(())
 }
-/// Encode fixed length string array. Column `FixedString` `Native Format`
+/// Encode fixed length string array. Column `FixedString` in `Native Format`
 /// |String byte array|...next item
 fn encode_fixedstring<T: AsRef<[u8]>>(data: &[T], size: u32, writer: &mut dyn Write) -> Result<()> {
     for s in data {
@@ -198,7 +204,7 @@ fn encode_enum16<T: AsRef<[u8]>>(
     }
     Ok(())
 }
-
+/// Bespoke String as well as FixedString, Enum output column implementation
 struct StringOutputColumn<T> {
     data: Vec<T>,
 }
@@ -233,7 +239,7 @@ where
         matches!(field.sql_type, SqlType::String | SqlType::FixedString(_) | SqlType::Enum8 | SqlType::Enum16)
     }
 }
-
+/// IPv4 output column
 impl ToColumn for Ipv4Addr {
     fn to_column(&self, _field: &Field, writer: &mut dyn Write) -> Result<()> {
         let mut b = self.octets();
@@ -242,14 +248,14 @@ impl ToColumn for Ipv4Addr {
         writer.write_all(&b[..]).map_err(Into::into)
     }
 }
-
+/// IPv6 output column
 impl ToColumn for Ipv6Addr {
     fn to_column(&self, _field: &Field, writer: &mut dyn Write) -> Result<()> {
         let b = self.octets();
         writer.write_all(&b[..]).map_err(Into::into)
     }
 }
-
+/// UUID output column
 impl ToColumn for Uuid {
     fn to_column(&self, _field: &Field, writer: &mut dyn Write) -> Result<()> {
         let i = self.as_u128();
@@ -259,7 +265,7 @@ impl ToColumn for Uuid {
             .map_err(Into::into)
     }
 }
-
+/// Data output column
 impl ToColumn for Date<Utc> {
     fn to_column(&self, _field: &Field, writer: &mut dyn Write) -> Result<()> {
         let days = (self.naive_utc() - *EPOCH).num_days();
@@ -272,7 +278,7 @@ impl ToColumn for Date<Utc> {
         writer.write_all(&days[..]).map_err(Into::into)
     }
 }
-
+/// DataTime and DateTime64 output column
 impl ToColumn for DateTime<Utc> {
     fn to_column(&self, field: &Field, writer: &mut dyn Write) -> Result<()> {
         let mut timestamp = self.timestamp();
@@ -298,7 +304,7 @@ impl ToColumn for DateTime<Utc> {
     }
 }
 
-macro_rules! to_column_discrete {
+macro_rules! to_column_numeric {
     ($t:ty, $f: ident, $endian: ty) => {
         impl ToColumn for $t {
             #[inline]
@@ -317,23 +323,24 @@ macro_rules! to_column_discrete {
     };
 }
 
-to_column_discrete!(i8, write_i8);
-to_column_discrete!(u8, write_u8);
-to_column_discrete!(i16, write_i16, LittleEndian);
-to_column_discrete!(u16, write_u16, LittleEndian);
-to_column_discrete!(i32, write_i32, LittleEndian);
-to_column_discrete!(u32, write_u32, LittleEndian);
-to_column_discrete!(i64, write_i64, LittleEndian);
-to_column_discrete!(u64, write_u64, LittleEndian);
+to_column_numeric!(i8, write_i8);
+to_column_numeric!(u8, write_u8);
+to_column_numeric!(i16, write_i16, LittleEndian);
+to_column_numeric!(u16, write_u16, LittleEndian);
+to_column_numeric!(i32, write_i32, LittleEndian);
+to_column_numeric!(u32, write_u32, LittleEndian);
+to_column_numeric!(i64, write_i64, LittleEndian);
+to_column_numeric!(u64, write_u64, LittleEndian);
 
 #[cfg(feature = "int128")]
-to_column_discrete!(i128, write_i128, LittleEndian);
+to_column_numeric!(i128, write_i128, LittleEndian);
 #[cfg(feature = "int128")]
-to_column_discrete!(u128, write_u128, LittleEndian);
+to_column_numeric!(u128, write_u128, LittleEndian);
 
-to_column_discrete!(f32, write_f32, LittleEndian);
-to_column_discrete!(f64, write_f64, LittleEndian);
+to_column_numeric!(f32, write_f32, LittleEndian);
+to_column_numeric!(f64, write_f64, LittleEndian);
 
+/// Decimal output column
 impl<T: ToColumn + DecimalBits> ToColumn for Decimal<T> {
     fn to_column(&self, field: &Field, writer: &mut dyn Write) -> Result<()> {
         if let SqlType::Decimal(p, s) = field.sql_type {
@@ -453,7 +460,6 @@ impl_intocolumn_simple!(Decimal128, |f| {
     }
 });
 
-// TODO make available to insert into DateTime64
 impl_intocolumn_simple!(DateTime<Utc>, |f| matches!(
     f.sql_type,
     SqlType::DateTime | SqlType::DateTime64(..)

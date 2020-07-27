@@ -1,5 +1,6 @@
 [package]
-name = "clickhouse-cityhash"
+name = "clickhouse-driver-cth"
+description = "CityHash binding for ClickHouse Asynchronous Driver."
 version = "0.1.0"
 authors = ["dmitry dulesov <dmitry.dulesov@gmail.com>"]
 edition = "2018"

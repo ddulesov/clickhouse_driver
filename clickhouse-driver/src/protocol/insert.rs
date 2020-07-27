@@ -67,7 +67,7 @@ impl<'a, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> InsertSink<'a, R, W> {
         }
         let compatible = |(head, col): (&BlockColumnHeader, &ColumnDataAdapter)| {
             head.name.eq(col.name)
-                && head.field.nullable == col.nullable
+                && head.field.flag == col.flag
                 && col.data.is_compatible(&head.field)
         };
         // For efficiency we check input data and column data format compatibility only once
