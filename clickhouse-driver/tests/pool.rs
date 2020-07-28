@@ -18,9 +18,9 @@ use tokio::{self, time::delay_for};
 // }
 
 pub fn get_pool() -> Pool {
-    let database_url =
-        env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "tcp://localhost?execute_timeout=5s&query_timeout=20s&pool_max=4&compression=lz4".into());
+    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "tcp://localhost?execute_timeout=5s&query_timeout=20s&pool_max=4&compression=lz4".into()
+    });
 
     Pool::create(database_url).expect("provide connection url in DATABASE_URL env variable")
 }

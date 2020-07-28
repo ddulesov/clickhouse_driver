@@ -1,28 +1,37 @@
-use clickhouse_derive::IsCommand;
+use chrono_tz::Tz;
+use futures::Future;
 use std::borrow::BorrowMut;
-use std::io::{self, Write};
 use std::marker::Unpin;
 use std::pin::Pin;
 use std::time::Duration;
-
-use chrono_tz::Tz;
-use futures::Future;
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::time;
 
-use super::block::{BlockColumn, BlockColumnHeader, BlockInfo, EmptyBlock, ServerBlock};
+use super::block::{BlockColumn, BlockColumnHeader, BlockInfo, ServerBlock};
 use super::code::*;
 use super::column::{AsInColumn, EnumColumn, FixedColumn, StringColumn};
 use super::encoder::Encoder;
 use super::packet::{ProfileInfo, Response};
-use super::query::Query;
 use super::value::{ValueDate, ValueDateTime, ValueDateTime64, ValueIp4, ValueIp6, ValueUuid};
-use super::{CompressionMethod, ServerInfo, ServerWriter};
+use super::{CompressionMethod, ServerInfo};
 use crate::compression::LZ4ReadAdapter;
 use crate::errors::{self, DriverError, Exception, Result, ServerError};
-use crate::pool::Options;
+use crate::protocol::column::{BoxString, LowCardinalityColumn};
 use crate::protocol::decoder::ValueReader;
-use crate::types::{parse_type_field, DecimalBits, Field, SqlType};
+#[cfg(feature = "int128")]
+use crate::types::ValueDecimal128;
+use crate::types::{parse_type_field, DecimalBits, Field, SqlType, ValueDecimal32, ValueDecimal64};
+
+macro_rules! err {
+    ($err: expr) => {
+        Err($err.into())
+    };
+}
+
+const SHARED_WITH_ADDITIONAL_KEY: u64 = 0x0001;
+const GLOBAL_DICTIONARY: u64 = 0x0100;
+const ADDITIONAL_KEY: u64 = 0x0200;
+//const UPDATE_KEY: u64 = 0x0400;
 
 pub(crate) async fn with_timeout<F, T, E>(fut: F, timeout: Duration) -> Result<T>
 where
@@ -124,7 +133,6 @@ impl<'a, R: AsyncRead + Unpin> ResponseStream<'a, R> {
             return Ok(None);
         }
         let mut code = [0u8; 1];
-
         loop {
             if 0 == self.reader.read(&mut code[..]).await? {
                 return Ok(None);
@@ -134,7 +142,6 @@ impl<'a, R: AsyncRead + Unpin> ResponseStream<'a, R> {
 
             match code {
                 _code @ SERVER_PONG => {
-                    //self.set_fuse();
                     return Ok(Some(Response::Pong));
                 }
                 _code @ SERVER_END_OF_STREAM => {
@@ -148,13 +155,14 @@ impl<'a, R: AsyncRead + Unpin> ResponseStream<'a, R> {
                     // Skip temporary table name
                     let mut rdr = ValueReader::new(self.reader.borrow_mut());
                     let l = rdr.read_vint().await?;
-                    //rdr.skip(l).await?;
 
                     Pin::new(self.reader.borrow_mut()).consume(l as usize);
 
-                    //TODO: read_block from `dyn AsyncRead`
+                    // TODO: simplify and standardize read_block. Make it first parameter  `dyn AsyncRead`
+
                     let resp = (if self.info.compression == CompressionMethod::LZ4 {
                         let mut lz4 = LZ4ReadAdapter::new(self.reader.borrow_mut());
+
                         read_block(&mut lz4, &self.columns, self.info.timezone).await
                     } else {
                         read_block(self.reader.borrow_mut(), &self.columns, self.info.timezone)
@@ -219,7 +227,7 @@ where
     rdr.read_vint().await?; //skip n1
     rdr.as_mut().read_exact(&mut b[0..1]).await?;
     let overflow: bool = b[0] != 0;
-    rdr.read_vint().await?; //skip n2
+    rdr.read_vint().await?;
     rdr.as_mut().read_exact(&mut b[..]).await?;
     rdr.read_vint().await?; //skip n3
 
@@ -251,84 +259,164 @@ pub(crate) async fn load_nulls<R: AsyncBufRead + Unpin>(
     Ok(nulls)
 }
 
-async fn load_column<R>(reader: R, field: &Field, rows: u64) -> Result<Box<dyn AsInColumn>>
+async fn load_lowcardinality_string<R>(
+    mut reader: R,
+    field: &Field,
+    rows: u64,
+) -> Result<Box<dyn AsInColumn>>
 where
     R: AsyncBufRead + Unpin,
 {
+    if field.sql_type != SqlType::String {
+        return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
+    }
+    // if rows == 0 {
+    //     return Ok(Box::new(LowCardinalityColumn::<u8>::empty()));
+    // }
+
+    // read version number
+    let mut v: u64 = reader.read_u64_le().await?;
+
+    if v != SHARED_WITH_ADDITIONAL_KEY {
+        return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
+    }
+    // read serialization type
+    v = reader.read_u64_le().await?;
+
+    if v & GLOBAL_DICTIONARY == GLOBAL_DICTIONARY {
+        return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
+    }
+    if v & ADDITIONAL_KEY == 0 {
+        return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
+    }
+    let index_type: u8 = v as u8 & 0x0F;
+    // read number of keys
+    v = reader.read_u64_le().await?;
+
+    let keys: FixedColumn<BoxString> =
+        FixedColumn::load_string_column(reader.borrow_mut(), v as u64).await?;
+    // read number of values
+    v = reader.read_u64_le().await?;
+    if v != rows {
+        return err!(DriverError::BrokenData);
+    }
+
+    match index_type {
+        0 => LowCardinalityColumn::<u8>::load_column(reader, rows, keys).await,
+        1 => LowCardinalityColumn::<u16>::load_column(reader, rows, keys).await,
+        2 => LowCardinalityColumn::<u32>::load_column(reader, rows, keys).await,
+        3 => LowCardinalityColumn::<u64>::load_column(reader, rows, keys).await,
+        _ => err!(DriverError::BrokenData),
+    }
+}
+
+async fn load_column<R>(mut reader: R, field: &Field, rows: u64) -> Result<Box<dyn AsInColumn>>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let nulls = if field.is_nullable() {
+        Some(load_nulls(reader.borrow_mut(), rows).await?)
+    } else {
+        None
+    };
+    // SqlType-to-Loader dispatch implementation
+    // TODO: rewrite as Fabric method
     let col: Box<dyn AsInColumn> = match field.sql_type {
-        SqlType::String => StringColumn::load_string_column(reader, rows).await?,
-        SqlType::FixedString(width) => {
-            StringColumn::load_fixed_string_column(reader, rows, width).await?
-        }
-        SqlType::UInt64 => FixedColumn::<u64>::load_column(reader, rows).await?,
-        SqlType::Int64 => {
-            let proxy = FixedColumn::<u64>::load_column(reader, rows).await?;
-            proxy.cast::<i64>()
-        }
-        SqlType::UInt32 => FixedColumn::<u32>::load_column(reader, rows).await?,
-        SqlType::Int32 => {
-            let proxy = FixedColumn::<u32>::load_column(reader, rows).await?;
-            proxy.cast::<i32>()
-        }
-        SqlType::UInt16 => FixedColumn::<u16>::load_column(reader, rows).await?,
-        SqlType::Int16 => {
-            let proxy = FixedColumn::<u16>::load_column(reader, rows).await?;
-            proxy.cast::<u16>()
-        }
-        SqlType::UInt8 => FixedColumn::<u8>::load_column(reader, rows).await?,
-        SqlType::Int8 => {
-            let proxy = FixedColumn::<u8>::load_column(reader, rows).await?;
-            proxy.cast::<u8>()
-        }
+        SqlType::String => StringColumn::load_string_column(reader, rows)
+            .await?
+            .set_nulls(nulls),
+        SqlType::FixedString(width) => StringColumn::load_fixed_string_column(reader, rows, width)
+            .await?
+            .set_nulls(nulls),
+        SqlType::UInt64 => FixedColumn::<u64>::load_column(reader, rows)
+            .await?
+            .set_nulls(nulls),
+        SqlType::Int64 => FixedColumn::<u64>::load_column(reader, rows)
+            .await?
+            .cast::<i64>()
+            .set_nulls(nulls),
+        SqlType::UInt32 => FixedColumn::<u32>::load_column(reader, rows)
+            .await?
+            .set_nulls(nulls),
+        SqlType::Int32 => FixedColumn::<u32>::load_column(reader, rows)
+            .await?
+            .cast::<i32>()
+            .set_nulls(nulls),
+        SqlType::UInt16 => FixedColumn::<u16>::load_column(reader, rows)
+            .await?
+            .set_nulls(nulls),
+        SqlType::Int16 => FixedColumn::<u16>::load_column(reader, rows)
+            .await?
+            .cast::<u16>()
+            .set_nulls(nulls),
+        SqlType::UInt8 => FixedColumn::<u8>::load_column(reader, rows)
+            .await?
+            .set_nulls(nulls),
+        SqlType::Int8 => FixedColumn::<u8>::load_column(reader, rows)
+            .await?
+            .cast::<u8>()
+            .set_nulls(nulls),
         SqlType::Float32 => {
-            let proxy = FixedColumn::<u32>::load_column(reader, rows).await?;
-            proxy.cast::<f32>()
+            FixedColumn::<u32>::load_column(reader, rows)
+                .await?
+                .cast::<f32>()
+                .set_nulls(nulls)
             //FixedColumn::<f32>::load_column(reader, rows).await?
         }
-        SqlType::Float64 => {
-            let proxy = FixedColumn::<u64>::load_column(reader, rows).await?;
-            proxy.cast::<f64>()
-        }
-        SqlType::Enum8 => EnumColumn::<i8>::load_column(reader, rows, field).await?,
-        SqlType::Enum16 => EnumColumn::<i16>::load_column(reader, rows, field).await?,
-        SqlType::Date => {
-            let proxy = FixedColumn::<u16>::load_column(reader, rows).await?;
-            proxy.cast::<ValueDate>()
-        }
-        SqlType::DateTime64(_p, _) => {
-            let proxy = FixedColumn::<u64>::load_column(reader, rows).await?;
-            proxy.cast::<ValueDateTime64>()
-        }
-        SqlType::DateTime => FixedColumn::<ValueDateTime>::load_column(reader, rows).await?,
-        SqlType::Uuid => {
-            let proxy = FixedColumn::<u128>::load_column(reader, rows).await?;
-            proxy.cast::<ValueUuid>()
-        }
-        SqlType::Ipv4 => {
-            let proxy = FixedColumn::<u32>::load_column(reader, rows).await?;
-            proxy.cast::<ValueIp4>()
-        }
-        SqlType::Ipv6 => {
-            let proxy = FixedColumn::<u128>::load_column(reader, rows).await?;
-            proxy.cast::<ValueIp6>()
-        }
-        SqlType::Decimal(p, _s) => {
-            if i32::fit(p) {
-                FixedColumn::<u32>::load_column(reader, rows).await?
-            } else if i64::fit(p) {
-                FixedColumn::<u64>::load_column(reader, rows).await?
-            } else {
-                #[cfg(feature = "int128")]
-                if i128::fit(p) {
-                    FixedColumn::<u128>::load_column(reader, rows).await?
-                }
-                return Err(DriverError::UnsupportedType(field.sql_type).into());
-            }
-        }
+        SqlType::Float64 => FixedColumn::<u64>::load_column(reader, rows)
+            .await?
+            .cast::<f64>()
+            .set_nulls(nulls),
+        SqlType::Enum8 => EnumColumn::<i8>::load_column(reader, rows, field)
+            .await?
+            .set_nulls(nulls),
+        SqlType::Enum16 => EnumColumn::<i16>::load_column(reader, rows, field)
+            .await?
+            .set_nulls(nulls),
+        SqlType::Date => FixedColumn::<u16>::load_column(reader, rows)
+            .await?
+            .cast::<ValueDate>()
+            .set_nulls(nulls),
+        SqlType::DateTime64(_p, _) => FixedColumn::<u64>::load_column(reader, rows)
+            .await?
+            .cast::<ValueDateTime64>()
+            .set_nulls(nulls),
+        SqlType::DateTime => FixedColumn::<ValueDateTime>::load_column(reader, rows)
+            .await?
+            .set_nulls(nulls),
+        SqlType::Uuid => FixedColumn::<u128>::load_column(reader, rows)
+            .await?
+            .cast::<ValueUuid>()
+            .set_nulls(nulls),
+        SqlType::Ipv4 => FixedColumn::<u32>::load_column(reader, rows)
+            .await?
+            .cast::<ValueIp4>()
+            .set_nulls(nulls),
+        SqlType::Ipv6 => FixedColumn::<u128>::load_column(reader, rows)
+            .await?
+            .cast::<ValueIp6>()
+            .set_nulls(nulls),
+        SqlType::Decimal(p, _s) => match p {
+            v if i32::fit(v) => FixedColumn::<u32>::load_column(reader, rows)
+                .await?
+                .cast::<ValueDecimal32>()
+                .set_nulls(nulls),
+            v if i64::fit(v) => FixedColumn::<u64>::load_column(reader, rows)
+                .await?
+                .cast::<ValueDecimal64>()
+                .set_nulls(nulls),
+            #[cfg(feature = "int128")]
+            v if i128::fit(v) => FixedColumn::<u128>::load_column(reader, rows)
+                .await?
+                .cast::<ValueDecimal128>()
+                .set_nulls(nulls),
+            _ => return err!(DriverError::UnsupportedType(field.sql_type)),
+        },
         _ => {
-            return Err(DriverError::UnsupportedType(field.sql_type).into());
+            return err!(DriverError::UnsupportedType(field.sql_type));
         }
     };
+
     Ok(col)
 }
 
@@ -355,9 +443,10 @@ where
     // Read block-data (BLK)
     for col_idx in 0..block_info.cols {
         let mut rdr = ValueReader::new(reader.borrow_mut());
-
+        // Read FNM
         l = rdr.read_vint().await?;
         let name: String = rdr.read_string(l).await?;
+        // Read TNM
         l = rdr.read_vint().await?;
         let field: String = rdr.read_string(l).await?;
         // TODO. Verify is every query block has the same order of columns?
@@ -371,17 +460,22 @@ where
             }
         };
 
-        let nulls = if field.nullable {
-            Some(load_nulls(reader.borrow_mut(), block_info.rows).await?)
+        if field.is_array() {
+            return err!(DriverError::UnsupportedType(SqlType::Array));
+        } else if field.is_lowcardinality() && field.sql_type != SqlType::String {
+            return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
+        }
+        // Read DATA
+        let col = if block_info.rows == 0 {
+            Box::new(()) as Box<dyn AsInColumn>
+        } else if field.is_lowcardinality() {
+            load_lowcardinality_string(reader.borrow_mut(), &field, block_info.rows).await?
         } else {
-            None
+            load_column(reader.borrow_mut(), &field, block_info.rows).await?
         };
-
-        let col = load_column(reader.borrow_mut(), &field, block_info.rows).await?;
-
+        // Append column to the list of block column adapters (dyn AsInColunm interface)
         block_columns.push(BlockColumn {
             data: col,
-            nulls,
             header: BlockColumnHeader { field, name },
         });
     }
@@ -507,78 +601,17 @@ where
     })
 }
 
-pub(crate) trait Command: ServerWriter {}
-
-#[derive(IsCommand)]
-pub(crate) struct Hello<'a> {
-    pub(crate) opt: &'a Options,
-}
-
-impl<'a> ServerWriter for Hello<'a> {
-    fn write(&self, _cx: &ServerInfo, writer: &mut dyn Write) -> io::Result<()> {
-        CLIENT_HELLO.encode(writer)?;
-
-        crate::CLIENT_NAME.encode(writer)?;
-        crate::CLICK_HOUSE_DBMSVERSION_MAJOR.encode(writer)?;
-        crate::CLICK_HOUSE_DBMSVERSION_MINOR.encode(writer)?;
-        crate::CLICK_HOUSE_REVISION.encode(writer)?;
-
-        self.opt.database.encode(writer)?;
-        self.opt.username.encode(writer)?;
-        self.opt.password.encode(writer)?;
-        Ok(())
-    }
-}
-
-#[derive(IsCommand)]
-pub(crate) struct Ping;
-
-impl ServerWriter for Ping {
-    fn write(&self, _cx: &ServerInfo, writer: &mut dyn Write) -> io::Result<()> {
-        CLIENT_PING.encode(writer)
-    }
-}
-
-#[derive(IsCommand)]
-pub(crate) struct Cancel;
-
-impl ServerWriter for Cancel {
-    fn write(&self, _cx: &ServerInfo, writer: &mut dyn Write) -> io::Result<()> {
-        CLIENT_CANCEL.encode(writer)
-    }
-}
-
-#[derive(IsCommand)]
-pub(crate) struct Execute {
-    pub(crate) query: Query,
-}
-
-impl ServerWriter for Execute {
-    fn write(&self, cx: &ServerInfo, writer: &mut dyn Write) -> io::Result<()> {
-        CLIENT_QUERY.encode(writer)?;
-        ().encode(writer)?;
-        // Query string (SELECT, INSERT or DDL )
-        self.query.write(cx, writer)?;
-        // Write empty block as a marker of the stream end
-        EmptyBlock.write(cx, writer)?;
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod test {
+    use super::*;
+    use crate::errors::Result;
+    use crate::protocol::encoder::Encoder;
     use std::cmp;
     use std::io;
     use std::mem::size_of_val;
     use std::pin::Pin;
     use std::task::{Context, Poll};
-
     use tokio::io::AsyncRead;
-
-    use crate::errors::Result;
-    use crate::protocol::encoder::Encoder;
-
-    use super::*;
 
     struct AsyncChunk<'a> {
         buf: &'a [u8],

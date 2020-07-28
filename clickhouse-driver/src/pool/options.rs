@@ -1,5 +1,6 @@
 use std::convert::TryFrom;
-use std::{borrow::Cow, fmt, str::FromStr, time::Duration};
+use std::fmt;
+use std::{borrow::Cow, str::FromStr, time::Duration};
 
 use url::Url;
 
@@ -60,14 +61,14 @@ pub struct Options {
     /// Restricts permissions for read data, write data and change settings queries.
     pub(crate) readonly: Option<u8>,
 
-    /// Count of retry to send request to server. (defaults to `3`)
+    /// The number of retries to send request to server. (defaults to `3`)
     pub(crate) send_retries: u8,
 
     /// Amount of time to wait before next retry. (defaults to `1 sec`)
     pub(crate) retry_timeout: Duration,
 }
 
-/// FIXME: replace with macro
+// FIXME: replace with macro
 fn parse_param<'a, F, T, E>(param: Cow<'a, str>, value: Cow<'a, str>, parse: F) -> Result<T>
 where
     F: Fn(&str) -> std::result::Result<T, E>,
@@ -228,7 +229,6 @@ impl Options {
     }
 }
 
-#[cfg(debug_assertions)]
 impl fmt::Debug for Options {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Options")
@@ -291,8 +291,8 @@ impl TryFrom<Url> for Options {
 
 /// Weird template TryFrom<T> implementation collision
 /// ( https://github.com/rust-lang/rust/issues/50133 )
-/// with TryFrom<&Url> make us to realize two separate implementations
-///  for &str and String
+/// with TryFrom<&Url> make us to draw up two separate implementations
+/// for &str and String
 impl TryFrom<&str> for Options {
     type Error = UrlError;
 
@@ -323,7 +323,7 @@ mod test {
     use crate::pool::Pool;
 
     #[test]
-    fn test_default_config() -> Result<()>  {
+    fn test_default_config() -> Result<()> {
         let pool = Pool::create("tcp://localhost?ping_timeout=1ms").unwrap();
 
         assert_eq!(pool.options().database, "default");

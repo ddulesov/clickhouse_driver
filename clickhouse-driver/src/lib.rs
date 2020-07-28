@@ -1,21 +1,59 @@
+//! ## Clickhouse-driver
+//! Asynchronous pure rust tokio-based  Clickhouse client library
+//!
+//! ## Quick start
+//! add dependencies
+//!  ```toml
+//!   clickhouse-driver = { version="0.1.0-alpha.1", path="../path_to_package"}
+//!   clickhouse-driver-lz4 = { version="0.1.0", path="../path_to_package"}
+//!   clickhouse-driver-cthrs = { version="0.1.0", path="../path_to_package"}
+//!   ```
+//!
+//! ## Supported Clickhouse data types
+//! * Date | DateTime | DateTime64- read/write
+//! * (U)Int(8|16|32|64) - read/write
+//! * Float32 | Float64 - read/write
+//! * UUID - read/write
+//! * String | FixedString- read/write
+//! * Ipv4 | Ipv6 - read/write
+//! * Nullable(*) - read/write
+//! * Decimal - read/write
+//! * Enum8, Enum16 - read/write
+//!
+//! * LowCardinality(String) - read
+//!
+//! ## Connection url
+//! ```url
+//! tcp://[username:password@]host.name[:port]/database?paramname=paramvalue&...
+//! ```
+//! for example
+//! ```url
+//! tcp://user:default@localhost/log?ping_timout=200ms&execute_timeout=5s&query_timeout=20s&pool_max=4&compression=lz4
+//! ```
+//! - default port: 9000
+//! - default username: "default"
+//! - default database: "default"
+//!
+//!
+
 #![recursion_limit = "128"]
 extern crate byteorder;
 extern crate chrono;
 extern crate chrono_tz;
 #[cfg(not(feature = "cityhash_rs"))]
-extern crate clickhouse_cityhash;
+extern crate clickhouse_driver_cth;
 #[cfg(feature = "cityhash_rs")]
-extern crate clickhouse_cityhash_rs;
-extern crate clickhouse_derive;
+extern crate clickhouse_driver_cthrs;
+
 extern crate core;
 #[macro_use]
 extern crate futures;
 extern crate hostname;
 #[macro_use]
 extern crate lazy_static;
-extern crate log;
 #[cfg(lz4)]
-extern crate lz4a;
+extern crate clickhouse_driver_lz4a;
+extern crate log;
 #[cfg(test)]
 extern crate rand;
 extern crate thiserror;
@@ -24,7 +62,6 @@ extern crate url;
 extern crate uuid;
 
 use pool::options::Options;
-//use crate::protocol::Encoder;
 
 #[cfg(not(target_endian = "little"))]
 compile_error!("only little-endian platforms supported");
@@ -34,18 +71,16 @@ mod compression;
 mod errors;
 mod pool;
 pub mod prelude;
+#[macro_use]
 mod protocol;
 mod types;
 
 #[allow(dead_code)]
 const MAX_STRING_LEN: usize = 64 * 1024;
-/// Max number of rows in server block, 64K is default value
-const MAX_BLOCK_SIZE: usize = 64 * 1024;
+/// Max number of rows in server block, 640K is default value
+const MAX_BLOCK_SIZE: usize = 640 * 1024;
 /// Max size of server block, bytes, 1M is default value
 const MAX_BLOCK_SIZE_BYTES: usize = 10 * 1024 * 1024;
-/// Connection state flags
-const FLAG_DETERIORATED: u8 = 0x01;
-const FLAG_PENDING: u8 = 0x02;
 
 pub static CLIENT_NAME: &str = "Rust Native Driver";
 pub const CLICK_HOUSE_REVISION: u64 = 54405;

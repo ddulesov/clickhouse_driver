@@ -57,10 +57,6 @@ pub(crate) struct Inner {
     wait: atomic::AtomicUsize,
     /// Pool status flag
     close: atomic::AtomicI8,
-    //disconnect: Option<Waker>,
-
-    // min: u16,
-    // max: u16,
 }
 
 impl Inner {
@@ -110,6 +106,13 @@ impl fmt::Debug for Pool {
 }
 
 impl Pool {
+    /// Create pool object from options or url.
+    ///
+    /// # Example
+    /// ```
+    /// use clickhouse_driver::prelude::*;
+    /// let pool = Pool::create("tcp://username:password@localhost/db?compression=lz4");
+    /// ```
     #[inline]
     pub fn create<T>(options: T) -> Result<Pool>
     where
@@ -118,7 +121,7 @@ impl Pool {
         let options = options.try_into()?;
         PoolBuilder::create(options)
     }
-
+    /// Return pool current status.
     #[inline(always)]
     pub fn info(&self) -> PoolInfo {
         let inner = &self.inner;
@@ -278,7 +281,7 @@ impl Pool {
     }
 
     #[inline]
-    fn options(&self) -> &Options {
+    pub fn options(&self) -> &Options {
         &self.inner.options
     }
 }

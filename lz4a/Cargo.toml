@@ -1,5 +1,6 @@
 [package]
-name = "lz4a"
+name = "clickhouse-driver-lz4"
+description = "LZ4 for ClickHouse Asynchronous Driver."
 version = "0.1.0"
 authors = ["Dmitry Dulesov <dmitry.dulesov@gmail.com>"]
 edition = "2018"

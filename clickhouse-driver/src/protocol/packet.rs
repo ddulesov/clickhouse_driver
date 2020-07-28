@@ -1,6 +1,77 @@
 use super::code::*;
-use crate::protocol::block::ServerBlock;
+use super::encoder::Encoder;
+use super::query::Query;
+use super::ServerWriter;
+use crate::client::ServerInfo;
+use crate::pool::Options;
+use crate::protocol::block::{EmptyBlock, ServerBlock};
 use chrono_tz::Tz;
+use std::{io, io::Write};
+// OUT
+
+pub(crate) trait Command: ServerWriter {}
+
+pub(crate) struct Hello<'a> {
+    pub(crate) opt: &'a Options,
+}
+
+impl Command for Hello<'_> {}
+
+impl<'a> ServerWriter for Hello<'a> {
+    fn write(&self, _cx: &ServerInfo, writer: &mut dyn Write) -> io::Result<()> {
+        CLIENT_HELLO.encode(writer)?;
+
+        crate::CLIENT_NAME.encode(writer)?;
+        crate::CLICK_HOUSE_DBMSVERSION_MAJOR.encode(writer)?;
+        crate::CLICK_HOUSE_DBMSVERSION_MINOR.encode(writer)?;
+        crate::CLICK_HOUSE_REVISION.encode(writer)?;
+
+        self.opt.database.encode(writer)?;
+        self.opt.username.encode(writer)?;
+        self.opt.password.encode(writer)?;
+        Ok(())
+    }
+}
+
+pub(crate) struct Ping;
+
+impl Command for Ping {}
+
+impl ServerWriter for Ping {
+    fn write(&self, _cx: &ServerInfo, writer: &mut dyn Write) -> io::Result<()> {
+        CLIENT_PING.encode(writer)
+    }
+}
+
+pub(crate) struct Cancel;
+
+impl Command for Cancel {}
+
+impl ServerWriter for Cancel {
+    fn write(&self, _cx: &ServerInfo, writer: &mut dyn Write) -> io::Result<()> {
+        CLIENT_CANCEL.encode(writer)
+    }
+}
+
+pub(crate) struct Execute {
+    pub(crate) query: Query,
+}
+
+impl Command for Execute {}
+
+impl ServerWriter for Execute {
+    fn write(&self, cx: &ServerInfo, writer: &mut dyn Write) -> io::Result<()> {
+        CLIENT_QUERY.encode(writer)?;
+        ().encode(writer)?;
+        // Query string (SELECT, INSERT or DDL )
+        self.query.write(cx, writer)?;
+        // Write empty block as a marker of the stream end
+        EmptyBlock.write(cx, writer)?;
+        Ok(())
+    }
+}
+
+// IN
 
 pub(crate) struct ProfileInfo {
     pub rows: u64,

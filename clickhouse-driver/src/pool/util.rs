@@ -37,12 +37,12 @@ impl<'a> Iterator for AddrIter<'a> {
     }
 }
 
-/// Connection pool state
+/// Connection pool status
+/// - The number of idle connections in pool
+/// - The total number of issued connections including idle and active
+/// - The number of tasks that are waiting for available connection
 pub struct PoolInfo {
-    /// The number of idle connections in pool
     pub idle: usize,
-    /// The total number of issued connections including idle and active
     pub issued: usize,
-    /// The number of tasks that are waiting for available connection
     pub wait: usize,
 }

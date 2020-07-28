@@ -5,17 +5,16 @@ use std::time::Duration;
 
 use crate::pool::Inner as InnerPool;
 use crate::protocol::block::{Block, ServerBlock};
-use crate::protocol::command::{Command, CommandSink, Execute, ResponseStream};
-use crate::protocol::command::{Hello, Ping};
+use crate::protocol::command::{CommandSink, ResponseStream};
 use crate::protocol::insert::InsertSink;
 use crate::protocol::packet::Response;
+use crate::protocol::packet::{Command, Execute, Hello, Ping};
 use crate::protocol::query::Query;
 use crate::protocol::{CompressionMethod, ServerWriter};
 use crate::{
     errors::{DriverError, Result},
     pool::{options::Options, Pool},
 };
-use crate::{FLAG_DETERIORATED, FLAG_PENDING};
 use chrono_tz::Tz;
 use log::info;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -23,6 +22,9 @@ use tokio::net::tcp::{ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 
 const DEF_OUT_BUF_SIZE: usize = 512;
+/// Connection state flags
+const FLAG_DETERIORATED: u8 = 0x01;
+const FLAG_PENDING: u8 = 0x02;
 
 #[derive(Debug)]
 pub(super) struct ServerInfo {
@@ -117,11 +119,11 @@ impl ServerContext for Inner {
 
 impl Inner {
     #[inline]
-    /// Is connection not initialized yet
+    /// Return true if the connection is not initialized yet
     fn is_null(&self) -> bool {
         self.socket.is_none()
     }
-    /// Check is the socket connected to peer
+    /// Check if the socket is connected to peer
     pub(super) fn is_ok(&self) -> bool {
         self.socket
             .as_ref()
@@ -142,7 +144,7 @@ impl Inner {
         }
     }
 
-    /// Establish connection to the server  
+    /// Establish a connection with the server
     pub(super) async fn init(inner_pool: &InnerPool, addr: &str) -> Result<Box<Inner>> {
         let socket = TcpStream::connect(addr).await?;
         Inner::setup_stream(&socket, &inner_pool.options)?;
@@ -182,6 +184,7 @@ impl Inner {
                     return Err(DriverError::ConnectionTimeout.into());
                 }
             };
+            inner.info.compression = options.compression;
         }
         Ok(inner)
     }
@@ -193,7 +196,7 @@ impl Inner {
     }
 
     async fn cleanup(&mut self) -> Result<()> {
-        //TODO add any finalization stuff
+        // TODO: ensure cancel command indeed interrupt long-running process
         if (self.info.flag & FLAG_PENDING) == FLAG_PENDING {
             let wrt = if let Some((_, wrt, _info)) = self.split() {
                 wrt
@@ -212,13 +215,13 @@ pub(crate) trait ServerContext {
     fn info(&self) -> &ServerInfo;
 }
 
+/// Clickhouse client connection
 pub struct Connection {
     inner: Box<Inner>,
     pub(crate) pool: Option<Pool>,
     out: Vec<u8>,
 }
 
-#[cfg(debug_assertions)]
 impl fmt::Debug for Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let peer = self.inner.socket.as_ref().map_or("-".to_string(), |s| {
@@ -249,15 +252,15 @@ impl Connection {
         }
     }
 
-    /// Returns Clickhouse server revision
+    /// Returns Clickhouse server revision number
     #[inline]
     pub fn revision(&self) -> u32 {
         self.inner.info.revision
     }
 
     /// Check if a connection has pending status.
-    /// connection get pending status on query call until all data will be fetched
-    /// or in insert call until commit
+    /// Connection get pending status during query call until all data will be fetched
+    /// or during insert call until commit
     #[inline]
     pub fn is_pending(&self) -> bool {
         self.inner.info.is_pending()
@@ -282,7 +285,7 @@ impl Connection {
         }
         Ok(())
     }
-    /// Get pool specific options or  default ones if former is not specified
+    /// Get pool specific options or default ones if the connection  is not established
     fn options(&self) -> &Options {
         self.pool.as_ref().map_or_else(
             || {
@@ -293,7 +296,11 @@ impl Connection {
         )
     }
 
-    /// Perform cleanum  and disconnect from server
+    /// Perform cleanum  and disconnect from server.
+    /// It would be better to drop connection instead of explicitly
+    /// call `close`.  Use `close` if you are not going to use the connection
+    /// again or you need to interrupt server processes,
+    /// associated with the connection
     pub async fn close(mut self) -> Result<()> {
         self.inner.cleanup().await?;
         self.disconnect()
@@ -321,7 +328,8 @@ impl Connection {
         Err(DriverError::ConnectionTimeout.into())
     }
 
-    /// Execute DDL query
+    /// Execute DDL query statement.
+    /// Query should not return query result. Otherwise it will return error.
     pub async fn execute(&mut self, ddl: impl Into<Query>) -> Result<()> {
         check_pending!(self);
         let timeout = self.options().execute_timeout;
@@ -341,7 +349,7 @@ impl Connection {
     /// Returns InsertSink that can be used to streaming next Blocks of data
     pub async fn insert(
         &mut self,
-        data: Block<'_>,
+        data: &Block<'_>,
     ) -> Result<InsertSink<'_, ReadHalf<'_>, WriteHalf<'_>>> {
         check_pending!(self);
 
@@ -363,10 +371,20 @@ impl Connection {
             return Err(DriverError::PacketOutOfOrder(0).into());
         };
 
-        stream.next(data).await?;
+        stream.next(&data).await?;
         Ok(stream)
     }
-    /// Execute SELECT query returning Block of data
+    /// Execute SELECT statement returning sequence of ServerBlocks.
+    ///
+    /// # Example
+    /// ```text
+    /// use clickhouse_driver::prelude::*;
+    ///
+    /// let pool = Pool::create("tcp://localhost/");
+    /// let mut con = pool.connection().await.unwrap();
+    /// let query = con.query("SELECT id,title,message,host,ip FROM log").await.unwrap();
+    /// //...
+    /// ```
     pub async fn query(
         &mut self,
         sql: impl Into<Query>,
@@ -398,7 +416,7 @@ impl Connection {
         CommandSink<WriteHalf<'_>>,
         &mut Vec<u8>, //&[u8],
     )> {
-        //todo!("truncate output buffer upon completion ");
+        // TODO: ("truncate output buffer upon completion ");
         self.out.clear();
 
         let (rdr, wrt, info) = if let Some((rdr, wrt, info)) = self.inner.split() {

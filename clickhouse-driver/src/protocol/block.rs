@@ -12,7 +12,7 @@ use super::value::IntoColumn;
 use super::ServerWriter;
 use crate::client::ServerInfo;
 use crate::compression::LZ4CompressionWrapper;
-use crate::types::Field;
+use crate::types::{Field, FIELD_NONE, FIELD_NULLABLE};
 use chrono_tz::Tz;
 
 pub struct RowIterator<'a> {
@@ -147,15 +147,15 @@ impl<'b> Block<'b> {
     }
     /// Add new column to the block
     /// NOTE! columns should be added in order of INSERT query
-    pub fn add<T: 'b>(mut self, name: &'b str, data: &'b [T]) -> Self
+    pub fn add<T: 'b>(mut self, name: &'b str, data: Vec<T>) -> Self
     where
-        T: IntoColumn,
+        T: IntoColumn<'b>,
     {
         self.set_rows(data.len());
 
         self.columns.push(ColumnDataAdapter {
             name,
-            nullable: false,
+            flag: FIELD_NONE,
             data: IntoColumn::to_column(data),
         });
         self
@@ -163,16 +163,16 @@ impl<'b> Block<'b> {
     /// Add new column to block.
     /// As opposed to add method here we add column for Nullable data types.
     /// Option None value is used to describe null data.
-    pub fn add_nullable<T: 'b>(mut self, name: &'b str, data: &'b [Option<T>]) -> Self
+    pub fn add_nullable<T: 'b>(mut self, name: &'b str, data: Vec<Option<T>>) -> Self
     where
-        Option<T>: IntoColumn,
+        Option<T>: IntoColumn<'b>,
         T: Default,
     {
         self.set_rows(data.len());
 
         self.columns.push(ColumnDataAdapter {
             name,
-            nullable: true,
+            flag: FIELD_NULLABLE,
             data: IntoColumn::to_column(data),
         });
         self
@@ -205,7 +205,7 @@ impl fmt::Debug for BlockColumnHeader {
 pub struct BlockColumn {
     pub(crate) header: BlockColumnHeader,
     pub(crate) data: Box<dyn AsInColumn>,
-    pub(crate) nulls: Option<Vec<u8>>,
+    //pub(crate) nulls: Option<Vec<u8>>,
 }
 
 impl BlockColumn {
@@ -322,7 +322,7 @@ impl AsBlock for EmptyBlock {
 /// columns data (Block) and
 /// Clickhouse server table metadata (   BlockColumnHeader[] )
 pub(super) struct OutputBlockWrapper<'b> {
-    pub(super) inner: Block<'b>,
+    pub(super) inner: &'b Block<'b>,
     pub(super) columns: &'b Vec<BlockColumnHeader>,
 }
 

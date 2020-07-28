@@ -6,9 +6,9 @@ use std::net::Ipv4Addr;
 use uuid::Uuid;
 
 pub fn get_pool() -> Pool {
-    let database_url =
-        env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "tcp://localhost?execute_timeout=5s&query_timeout=20s&pool_max=4&compression=lz4".into());
+    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "tcp://localhost?execute_timeout=5s&query_timeout=20s&pool_max=4&compression=lz4".into()
+    });
 
     Pool::create(database_url).expect("provide connection url in DATABASE_URL env variable")
 }
@@ -113,6 +113,26 @@ async fn test_query_nullable() -> errors::Result<()> {
             assert_eq!(n.unwrap(), 1u16);
         }
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_query_lowcardinality() -> errors::Result<()> {
+    let pool = get_pool();
+    let mut conn = pool.connection().await?;
+
+    let mut query_result = conn
+        .query("SELECT lcs FROM main WHERE lcs='May' LIMIT 1000")
+        .await?;
+
+    while let Some(block) = query_result.next().await? {
+        for row in block.iter_rows() {
+            let lcs: &str = row.value(0)?.unwrap();
+            assert_eq!(lcs, "May");
+        }
+    }
+    drop(query_result);
+
     Ok(())
 }
 

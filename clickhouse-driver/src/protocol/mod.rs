@@ -104,8 +104,8 @@ pub mod query;
 pub mod value;
 
 #[derive(Copy, Clone, PartialEq, Debug)]
-/// At the moment we support only LZ4 compression method
-/// It's used by default by Clickhouse 20.x
+/// At the moment Clickhouse_driver supports only LZ4 compression method.
+/// It's used by default in Clickhouse 20.x
 pub enum CompressionMethod {
     None,
     LZ4,
@@ -117,17 +117,21 @@ impl CompressionMethod {
         matches!(self, CompressionMethod::None)
     }
 }
-/// A trait for provide common interface for client request serialization
+/// This trait provides common interface for client request serialization.
 /// ServerInfo parameter keeps server specific options (revision, compression method ...)
-/// and defines encoded rules and version specific options
+/// and defines encoded rules, version specific options, and timezone.
 pub(crate) trait ServerWriter {
     fn write(&self, cx: &ServerInfo, writer: &mut dyn Write) -> io::Result<()>;
 }
 
-/// Defines proxy for Rust to dynamic sql data of Clickhouse Row value
+/// Proxy gateway from rust to dynamic sql data of Clickhouse Row value
 #[derive(Debug)]
 pub enum ValueRefEnum<'a> {
     String(&'a [u8]),
+    //Array8(&'a [u8] ),
+    //Array16(&'a [u16]),
+    //Array32(&'a [u32]),
+    //Array64(&'a [u64]),
     UInt8(u8),
     UInt16(u16),
     UInt32(u32),
@@ -136,12 +140,14 @@ pub enum ValueRefEnum<'a> {
     Int16(i16),
     Int32(i32),
     Int64(i64),
+    #[cfg(feature = "int128")]
     UInt128(u128),
     Float32(f32),
     Float64(f64),
     Date(ValueDate),
     DateTime(ValueDateTime),
     DateTime64(ValueDateTime64),
+    Enum(i16),
     Ip4(ValueIp4),
     Ip6(ValueIp6),
     Uuid(ValueUuid),
@@ -160,8 +166,10 @@ pub trait Value<'a, T: 'a> {
 
 #[cfg(test)]
 mod test {
-    use crate::protocol::column::EnumIndex;
+    use super::ValueRefEnum;
+    use crate::protocol::column::{EnumIndex, ValueRef};
     use crate::types::FieldMeta;
+    use std::mem::size_of;
 
     macro_rules! into_boxed {
         ($s: expr) => {
@@ -197,5 +205,17 @@ mod test {
         assert_eq!(meta.str2val(b"unknown").unwrap(), -2i16);
         assert_eq!(meta.str2val(b"n/a").unwrap(), -1i16);
         assert!(meta.str2val(b"some other").is_err());
+    }
+
+    #[test]
+    fn test_valueref_size() {
+        let valueref_size = size_of::<ValueRef>();
+        let valuerefenum_size = size_of::<ValueRefEnum>();
+
+        assert_eq!(valueref_size, valuerefenum_size);
+        assert!(
+            valueref_size <= 24,
+            "ValueRef should be smaller than 32 bytes. 16 bytes - data + 8 bytes descriptor"
+        );
     }
 }

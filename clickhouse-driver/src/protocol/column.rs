@@ -12,6 +12,8 @@ use uuid::Uuid;
 
 use super::block::{BlockColumn, ServerBlock};
 use super::decoder::ValueReader;
+#[cfg(feature = "int128")]
+use super::value::ValueDecimal128;
 use super::value::{
     ValueDate, ValueDateTime, ValueDateTime64, ValueDecimal32, ValueDecimal64, ValueIp4, ValueIp6,
     ValueUuid,
@@ -26,6 +28,12 @@ use crate::types::{Decimal, Decimal32, Decimal64, Field, FieldMeta, SqlType};
 use std::cmp::Ordering;
 use std::fmt::Formatter;
 
+macro_rules! err {
+    ($err: expr) => {
+        Err($err.into())
+    };
+}
+
 pub trait AsOutColumn {
     fn len(&self) -> usize;
     fn encode(&self, field: &Field, writer: &mut dyn Write) -> Result<()>;
@@ -34,13 +42,19 @@ pub trait AsOutColumn {
 
 /// Convert received from Clickhouse server data to rust type
 pub trait AsInColumn: Send {
-    fn len(&self) -> usize;
-    unsafe fn get_at<'a>(&'a self, index: u64, field: &'a Field) -> ValueRef<'a>;
+    unsafe fn get_at(&self, index: u64) -> ValueRef<'_>;
 }
+
+impl AsInColumn for () {
+    unsafe fn get_at(&self, _: u64) -> ValueRef<'_> {
+        ValueRef { inner: None }
+    }
+}
+
 /// Output block column
 pub struct ColumnDataAdapter<'b> {
     pub(crate) name: &'b str,
-    pub(crate) nullable: bool,
+    pub(crate) flag: u8,
     pub(crate) data: Box<dyn AsOutColumn + 'b>,
 }
 
@@ -60,51 +74,89 @@ impl<'a> Value<'a, DateTime<Utc>> for ValueRef<'a> {
                     Ok(Some(v.to_datetime(p)))
                 } else {
                     // TODO: Apparently not reachable. Replace it with notreachable!
-                    Err(ConversionError::UnsupportedConversion.into())
+                    err!(ConversionError::UnsupportedConversion)
                 }
             }
             Some(ValueRefEnum::Date(v)) => {
                 let d = v.to_date();
                 Ok(Some(d.and_hms(0, 0, 0)))
             }
-            _ => Err(ConversionError::UnsupportedConversion.into()),
+            _ => err!(ConversionError::UnsupportedConversion),
         }
     }
 }
-/// Implement SqlType::String->&str data conversion
+/// Implement SqlType::Enum(x)|String|FixedSring(size)->&str data conversion
 impl<'a> Value<'a, &'a str> for ValueRef<'a> {
-    fn get(&'a self, _: &'a Field) -> Result<Option<&'_ str>> {
+    fn get(&'a self, field: &'a Field) -> Result<Option<&'_ str>> {
         match self.inner {
             Some(ValueRefEnum::String(v)) => Ok(Some(from_utf8(v)?)),
-            _ => Err(ConversionError::UnsupportedConversion.into()),
+            Some(ValueRefEnum::Enum(v)) => {
+                let meta = field.get_meta().expect("corrupted enum index");
+                let title = v.transcode(meta);
+                Ok(Some(from_utf8(title)?))
+            }
+            _ => err!(ConversionError::UnsupportedConversion),
         }
     }
 }
+
+/// Implement SqlType::Enum(x)|String|FixedSring(size) - > &[u8]
+impl<'a> Value<'a, &'a [u8]> for ValueRef<'a> {
+    fn get(&'a self, field: &'a Field) -> Result<Option<&'_ [u8]>> {
+        match self.inner {
+            Some(ValueRefEnum::String(v)) => Ok(Some(v)),
+            Some(ValueRefEnum::Enum(v)) => {
+                let meta = field.get_meta().expect("corrupted enum index");
+                let title = v.transcode(meta);
+                Ok(Some(title))
+            }
+            _ => err!(ConversionError::UnsupportedConversion),
+        }
+    }
+}
+
+#[inline]
+fn decimal_scale_from_field(field: &Field) -> u8 {
+    match field.sql_type {
+        SqlType::Decimal(_, s) => s,
+        _ => 0, //unreachable
+    }
+}
+
 /// Implement SqlType::Decimal32 -> Decimal<i32> data conversion
 impl<'a> Value<'a, Decimal32> for ValueRef<'a> {
-    fn get(&'a self, _: &'a Field) -> Result<Option<Decimal32>> {
+    fn get(&'a self, field: &'a Field) -> Result<Option<Decimal32>> {
         match self.inner {
-            Some(ValueRefEnum::Decimal32(v)) => Ok(Some(Decimal::from_parts(v.0, v.1, v.2))),
-            _ => Err(ConversionError::UnsupportedConversion.into()),
+            Some(ValueRefEnum::Decimal32(v)) => {
+                let scale = decimal_scale_from_field(field);
+                Ok(Some(Decimal::from(v.0, scale)))
+            }
+            _ => err!(ConversionError::UnsupportedConversion),
         }
     }
 }
 /// Implement SqlType::Decimal64 -> Decimal<i64> data conversion
 impl<'a> Value<'a, Decimal64> for ValueRef<'a> {
-    fn get(&'a self, _: &'a Field) -> Result<Option<Decimal64>> {
+    fn get(&'a self, field: &'a Field) -> Result<Option<Decimal64>> {
         match self.inner {
-            Some(ValueRefEnum::Decimal64(v)) => Ok(Some(Decimal::from_parts(v.0, v.1, v.2))),
-            _ => Err(ConversionError::UnsupportedConversion.into()),
+            Some(ValueRefEnum::Decimal64(v)) => {
+                let scale = decimal_scale_from_field(field);
+                Ok(Some(Decimal::from(v.0, scale)))
+            }
+            _ => err!(ConversionError::UnsupportedConversion),
         }
     }
 }
 /// Implement SqlType::Decimal128 -> Decimal<i128> data conversion
 #[cfg(feature = "int128")]
 impl<'a> Value<'a, Decimal128> for ValueRef<'a> {
-    fn get(&'a self, _: &'a Field) -> Result<Option<Decimal128>> {
+    fn get(&'a self, field: &'a Field) -> Result<Option<Decimal128>> {
         match self.inner {
-            Some(ValueRefEnum::Decimal128(v)) => Ok(Some(Decimal::from_parts(v.0, v.1, v.2))),
-            _ => Err(ConversionError::UnsupportedConversion.into()),
+            Some(ValueRefEnum::Decimal128(v)) => {
+                let scale = decimal_scale_from_field(field);
+                Ok(Some(Decimal::from(v.0, scale)))
+            }
+            _ => err!(ConversionError::UnsupportedConversion),
         }
     }
 }
@@ -116,7 +168,7 @@ macro_rules! impl_value {
                 match self.inner {
                     Some($vr(v)) => Ok(Some(v.into())),
                     None => Ok(None),
-                    _ => Err(ConversionError::UnsupportedConversion.into()),
+                    _ => err!(ConversionError::UnsupportedConversion),
                 }
             }
         }
@@ -132,9 +184,8 @@ impl_value!(Ipv4Addr, ValueRefEnum::Ip4);
 impl_value!(Ipv6Addr, ValueRefEnum::Ip6);
 // SqlType::UUID - > Uuid
 impl_value!(Uuid, ValueRefEnum::Uuid);
-// SqlType::Enum(x)|String|FixedSring(size) - > &[u8]
-impl_value!(&'a [u8], ValueRefEnum::String);
 
+// SqlType::X t-> X
 impl_value!(u64, ValueRefEnum::UInt64);
 impl_value!(i64, ValueRefEnum::Int64);
 impl_value!(u32, ValueRefEnum::UInt32);
@@ -144,7 +195,7 @@ impl_value!(i16, ValueRefEnum::Int16);
 impl_value!(u8, ValueRefEnum::UInt8);
 impl_value!(i8, ValueRefEnum::Int8);
 
-/// An implementation provides Row to Object deserialization interface
+/// An implementation provides Row-to-Object deserialization interface
 /// It's used internally by block iterator
 ///
 /// # Example
@@ -170,17 +221,7 @@ impl<'a> Row<'a> {
         let col: Vec<_> = block
             .columns
             .iter()
-            .map(|c| {
-                let n = c
-                    .nulls
-                    .as_ref()
-                    .map_or(0, |nulls| nulls[row_index as usize]);
-                if n == 1 {
-                    ValueRef { inner: None }
-                } else {
-                    c.data.get_at(row_index, &c.header.field)
-                }
-            })
+            .map(|c| c.data.get_at(row_index))
             .collect();
         Row { col, block }
     }
@@ -274,77 +315,17 @@ impl<'a> Row<'a> {
 }
 
 impl<'a, C: AsInColumn + ?Sized + 'a> AsInColumn for Box<C> {
-    fn len(&self) -> usize {
-        self.as_ref().len()
-    }
-
-    unsafe fn get_at<'b>(&'b self, index: u64, field: &'b Field) -> ValueRef<'b> {
-        self.as_ref().get_at(index, field)
+    #[inline]
+    unsafe fn get_at(&self, index: u64) -> ValueRef<'_> {
+        self.as_ref().get_at(index)
     }
 }
 
-type BoxString = Box<[u8]>;
+pub(crate) type BoxString = Box<[u8]>;
 
-pub(crate) struct StringColumn {
-    data: Vec<BoxString>,
-}
-
-impl StringColumn {
-    pub(crate) async fn load_string_column<R: AsyncBufRead + Unpin>(
-        reader: R,
-        rows: u64,
-    ) -> Result<Box<StringColumn>> {
-        let mut data: Vec<BoxString> = Vec::with_capacity(rows as usize);
-
-        let mut rdr = ValueReader::new(reader);
-        let mut l: u64;
-        for _ in 0..rows {
-            l = rdr.read_vint().await?;
-            let s: Vec<u8> = rdr.read_string(l).await?;
-            data.push(s.into_boxed_slice());
-        }
-
-        Ok(Box::new(StringColumn { data }))
-    }
-
-    pub(crate) async fn load_fixed_string_column<R: AsyncBufRead + Unpin>(
-        mut reader: R,
-        rows: u64,
-        width: u32,
-    ) -> Result<Box<StringColumn>> {
-        let mut data: Vec<BoxString> = Vec::with_capacity(rows as usize);
-
-        for _ in 0..rows {
-            let mut s: Vec<u8> = Vec::with_capacity(width as usize);
-            unsafe {
-                s.set_len(width as usize);
-            }
-            reader.read_exact(s.as_mut_slice()).await?;
-            data.push(s.into_boxed_slice());
-        }
-
-        Ok(Box::new(StringColumn { data }))
-    }
-}
-
-impl AsInColumn for StringColumn {
-    fn len(&self) -> usize {
-        self.data.len()
-    }
-    unsafe fn get_at(&self, index: u64, _: &Field) -> ValueRef<'_> {
-        assert!((index as usize) < self.data.len());
-
-        let vr = self.data.get_unchecked(index as usize);
-        let vr = vr.as_ref();
-
-        ValueRef {
-            inner: Some(ValueRefEnum::String(vr)),
-        }
-    }
-}
-
-/// Enum value , String index pair,
-/// 0-clickhouse value, 1-string index in data vector
+/// Enum value, String index pair,
+/// 0-T, clickhouse value
+/// 1-BoxString, enum string value
 #[derive(Clone)]
 pub struct EnumIndex<T>(pub T, pub BoxString);
 
@@ -375,28 +356,29 @@ impl<T: PartialEq> PartialEq for EnumIndex<T> {
 }
 
 impl<T: Copy + fmt::Display> fmt::Display for EnumIndex<T> {
+    /// Format Enum index value as a string that represent enum metadata
     #[allow(unused_must_use)]
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use std::fmt::Write;
         f.write_str("'")?;
-        // SAFETY! all Enum string values got from Server as plain string.
+        // SAFETY! all Enum string values are received from Server as a
+        // part of Enum metadata. So, all titles  is valid utf-8.
         let s = unsafe { self.as_str() };
         s.escape_default().for_each(|c| {
             f.write_char(c);
         });
-        //f.write_str(s);
         f.write_str("' = ")?;
         f.write_fmt(format_args!("{}", self.0))
     }
 }
 
 pub trait EnumTranscode: Copy {
+    /// Perform Enum value to Enum title conversion
     fn transcode(self, meta: &FieldMeta) -> &[u8];
 }
 
-// TODO: make  FieldMeta.index typeless
 // interpret it as *T (i8, u8) (i16, u16) in relation to input type
-// TODO: return u16::MAX on any error
+// TODO: return empty slice instead of panic
 /// transform enum value to index in title array
 impl EnumTranscode for i16 {
     #[inline]
@@ -405,17 +387,20 @@ impl EnumTranscode for i16 {
     }
 }
 
+/// Array of Enum8 or Enum16 values
 pub(crate) struct EnumColumn<T> {
     data: Vec<T>,
 }
 
-/// T can be 'u8' or 'u16'
+/// T can be 'u8'(Enum8) or 'u16'(Enum16)
 impl<T: Send> EnumColumn<T> {
+    /// Read server stream as a sequence of u8(u16) bytes
+    /// and store them in internal buffer
     pub(crate) async fn load_column<R: AsyncBufRead + Unpin>(
         mut reader: R,
         rows: u64,
         field: &Field,
-    ) -> Result<Box<EnumColumn<T>>> {
+    ) -> Result<EnumColumn<T>> {
         debug_assert!(field.get_meta().is_some());
 
         let mut data: Vec<T> = Vec::with_capacity(rows as usize);
@@ -423,40 +408,55 @@ impl<T: Send> EnumColumn<T> {
             data.set_len(rows as usize);
             reader.read_exact(as_bytes_bufer_mut(&mut data)).await?;
         }
-        Ok(Box::new(EnumColumn { data }))
+        Ok(EnumColumn { data })
+    }
+    pub(crate) fn set_nulls(self, _nulls: Option<Vec<u8>>) -> Box<EnumColumn<T>> {
+        // TODO: Check nullable enum case. If Enum can be nullable how it stores nulls?
+        Box::new(self)
     }
 }
 
 impl<'a, T: Copy + Send + Into<i16>> AsInColumn for EnumColumn<T> {
-    fn len(&self) -> usize {
-        self.data.len()
-    }
-
-    unsafe fn get_at<'b>(&'b self, index: u64, field: &'b Field) -> ValueRef<'b> {
+    /// Perform conversion of Enum value to corresponding reference to title.
+    /// Store the reference  in ValueRef struct
+    unsafe fn get_at(&self, index: u64) -> ValueRef<'_> {
         assert!((index as usize) < self.data.len());
-        let meta = match field.get_meta() {
-            Some(meta) => meta,
-
-            // TODO: Apparently it's unreachanble code and should  rewrite using
-            // unreachable! macro
-            None => return ValueRef { inner: None },
-        };
-
-        let enum_value: i16 = (*self.data.get_unchecked(index as usize)).into(); //[index as usize];
-        let title = enum_value.transcode(meta);
+        let enum_value: i16 = (*self.data.get_unchecked(index as usize)).into();
 
         ValueRef {
-            inner: Some(ValueRefEnum::String(title)),
+            inner: Some(ValueRefEnum::Enum(enum_value)),
         }
     }
 }
-/// Fixed sized type column
+
+/// Column of sized types that can be represented
+/// in memory as continuous array of fixed-size elements
 pub(crate) struct FixedColumn<T: Sized> {
     data: Vec<T>,
 }
 
+/// Column of fixed-size types with `is-null` status indicator
+pub(crate) struct FixedNullColumn<T: Sized> {
+    inner: FixedColumn<T>,
+    nulls: Vec<u8>,
+}
+
+impl<'a, T> AsInColumn for FixedColumn<T>
+where
+    T: Send + Sized + ValueIndex + 'static,
+{
+    unsafe fn get_at(&self, index: u64) -> ValueRef<'_> {
+        debug_assert!((index as usize) < self.data.len());
+        ValueRef {
+            inner: Some(ValueIndex::valueref_at(self.data.as_slice(), index)),
+        }
+    }
+}
+/// Borrow mutable reference to an array of
+/// arbitrary type and represent it as an array of bytes.
+/// It's used internally to load array of integer data types from socket stream.
 #[inline]
-pub unsafe fn as_bytes_bufer_mut<T>(v: &mut [T]) -> &mut [u8] {
+pub(crate) unsafe fn as_bytes_bufer_mut<T>(v: &mut [T]) -> &mut [u8] {
     std::slice::from_raw_parts_mut(
         v.as_mut_ptr() as *mut u8,
         v.len() * std::mem::size_of::<T>(),
@@ -464,15 +464,68 @@ pub unsafe fn as_bytes_bufer_mut<T>(v: &mut [T]) -> &mut [u8] {
 }
 
 #[inline]
-pub unsafe fn as_bytes_bufer<T>(v: &[T]) -> &[u8] {
+pub(crate) unsafe fn as_bytes_bufer<T>(v: &[T]) -> &[u8] {
     std::slice::from_raw_parts(v.as_ptr() as *mut u8, v.len() * std::mem::size_of::<T>())
 }
 
+/// Column of String represented as an array of Boxed byte arrays
+pub(crate) type StringColumn = FixedColumn<BoxString>;
+
+impl FixedColumn<BoxString> {
+    pub(crate) async fn load_string_column<R: AsyncBufRead + Unpin>(
+        reader: R,
+        rows: u64,
+    ) -> Result<StringColumn> {
+        let mut data: Vec<BoxString> = Vec::with_capacity(rows as usize);
+
+        let mut rdr = ValueReader::new(reader);
+        let mut l: u64;
+        for _ in 0..rows {
+            l = rdr.read_vint().await?;
+            let s: Vec<u8> = rdr.read_string(l).await?;
+            data.push(s.into_boxed_slice());
+        }
+
+        Ok(StringColumn { data })
+    }
+
+    pub(crate) async fn load_fixed_string_column<R: AsyncBufRead + Unpin>(
+        mut reader: R,
+        rows: u64,
+        width: u32,
+    ) -> Result<StringColumn> {
+        let mut data: Vec<BoxString> = Vec::with_capacity(rows as usize);
+
+        for _ in 0..rows {
+            let mut s: Vec<u8> = Vec::with_capacity(width as usize);
+            unsafe {
+                s.set_len(width as usize);
+            }
+            reader.read_exact(s.as_mut_slice()).await?;
+            data.push(s.into_boxed_slice());
+        }
+
+        Ok(StringColumn { data })
+    }
+}
+
+// impl AsInColumn for FixedColumn<BoxString> {
+//     unsafe fn get_at(&self, index: u64) -> ValueRef<'_> {
+//         assert!((index as usize) < self.data.len());
+//         let vr = self.data.get_unchecked(index as usize);
+//
+//         ValueRef {
+//             inner: Some(ValueRefEnum::String(vr)),
+//         }
+//     }
+// }
+
 impl<T: Sized> FixedColumn<T> {
+    /// Load Column of integer data types from the socket buffer
     pub(crate) async fn load_column<R: AsyncBufRead + Unpin>(
         mut reader: R,
         rows: u64,
-    ) -> Result<Box<FixedColumn<T>>> {
+    ) -> Result<FixedColumn<T>> {
         let mut data: Vec<T> = Vec::with_capacity(rows as usize);
 
         unsafe {
@@ -480,66 +533,237 @@ impl<T: Sized> FixedColumn<T> {
             reader.read_exact(as_bytes_bufer_mut(&mut data)).await?;
         }
 
-        Ok(Box::new(FixedColumn { data }))
+        Ok(FixedColumn { data })
     }
-
-    pub(crate) fn cast<U: Sized>(self: Box<FixedColumn<T>>) -> Box<FixedColumn<U>> {
+    /// Cast Column of one data type to another.
+    /// Many types (UUID, Date, DateTime, Ip..) have the same memory representations
+    /// as basic integer types (u16, u32, u64,...). Hence we can load data as an array of
+    /// integers and cast it to desired type. This is true for little endian platforms.
+    /// A bit-endian require byte swap, that can be done in ValueRef getter interface.
+    pub(crate) fn cast<U: Sized>(self: FixedColumn<T>) -> FixedColumn<U> {
         assert_eq!(size_of::<T>(), size_of::<U>());
         assert!(align_of::<T>() >= align_of::<U>());
 
         unsafe {
             let mut clone = std::mem::ManuallyDrop::new(self);
-
-            Box::new(FixedColumn {
+            FixedColumn {
                 data: Vec::from_raw_parts(
                     clone.data.as_mut_ptr() as *mut U,
                     clone.data.len(),
                     clone.data.capacity(),
                 ),
-            })
+            }
         }
     }
 }
 
+impl<T> FixedColumn<T>
+where
+    T: Sized + Send + 'static,
+    FixedNullColumn<T>: AsInColumn,
+    FixedColumn<T>: AsInColumn,
+{
+    /// Wrap the Column in FixedNullColumn adapter if nulls array is provided.
+    /// Return the unchanged Column if nulls is not provided.
+    #[inline]
+    pub(crate) fn set_nulls(self: Self, nulls: Option<Vec<u8>>) -> Box<dyn AsInColumn> {
+        if let Some(nulls) = nulls {
+            Box::new(FixedNullColumn { inner: self, nulls })
+        } else {
+            Box::new(self)
+        }
+    }
+}
+/// Row getter interface implementation for nullable column of fixed data types
+impl<T: Sized> AsInColumn for FixedNullColumn<T>
+where
+    FixedColumn<T>: AsInColumn,
+{
+    unsafe fn get_at(&self, index: u64) -> ValueRef<'_> {
+        debug_assert!((index as usize) < self.nulls.len());
+        if self.nulls[index as usize] == 1 {
+            ValueRef { inner: None }
+        } else {
+            self.inner.get_at(index)
+        }
+    }
+}
+/// Any type that implement ValueIndex trait can be loaded into FixedColumn
+pub(crate) trait ValueIndex: Sized {
+    unsafe fn valueref_at(_: &[Self], index: u64) -> ValueRefEnum<'_>;
+}
+
+impl ValueIndex for BoxString {
+    #[inline]
+    unsafe fn valueref_at(this: &[BoxString], index: u64) -> ValueRefEnum<'_> {
+        let vr = this.get_unchecked(index as usize);
+        ValueRefEnum::String(vr.as_ref())
+    }
+}
+
+macro_rules! impl_vre_at {
+    ($f:ty,$vr:expr) => {
+        impl ValueIndex for $f {
+            #[inline]
+            unsafe fn valueref_at(this: &[$f], index: u64) -> ValueRefEnum<'_> {
+                debug_assert!((index as usize) < this.len());
+                let vr = this.get_unchecked(index as usize);
+                $vr(*vr)
+            }
+        }
+    };
+}
+
+impl_vre_at!(u8, ValueRefEnum::UInt8);
+impl_vre_at!(i8, ValueRefEnum::Int8);
+impl_vre_at!(u16, ValueRefEnum::UInt16);
+impl_vre_at!(i16, ValueRefEnum::Int16);
+impl_vre_at!(u32, ValueRefEnum::UInt32);
+impl_vre_at!(i32, ValueRefEnum::Int32);
+impl_vre_at!(u64, ValueRefEnum::UInt64);
+impl_vre_at!(i64, ValueRefEnum::Int64);
+#[cfg(feature = "int128")]
+impl_vre_at!(u128, ValueRefEnum::UInt128);
+
+impl_vre_at!(f32, ValueRefEnum::Float32);
+impl_vre_at!(f64, ValueRefEnum::Float64);
+
+impl_vre_at!(ValueUuid, ValueRefEnum::Uuid);
+impl_vre_at!(ValueIp4, ValueRefEnum::Ip4);
+impl_vre_at!(ValueIp6, ValueRefEnum::Ip6);
+
+impl_vre_at!(ValueDecimal32, ValueRefEnum::Decimal32);
+impl_vre_at!(ValueDecimal64, ValueRefEnum::Decimal64);
+#[cfg(feature = "int128")]
+impl_vre_at!(ValueDecimal128, ValueRefEnum::Decimal128);
+
+impl_vre_at!(ValueDate, ValueRefEnum::Date);
+impl_vre_at!(ValueDateTime, ValueRefEnum::DateTime);
+impl_vre_at!(ValueDateTime64, ValueRefEnum::DateTime64);
+
+#[allow(unused_macros)]
 macro_rules! impl_fixed_column {
     ($f:ty,$vr:expr) => {
         impl AsInColumn for FixedColumn<$f> {
-            #[inline]
-            fn len(&self) -> usize {
-                self.data.len()
-            }
-            unsafe fn get_at(&self, index: u64, _: &Field) -> ValueRef<'_> {
-                assert!((index as usize) < self.data.len());
-                let vr = self.data[index as usize];
+            unsafe fn get_at(&self, index: u64) -> ValueRef<'_> {
+                debug_assert!((index as usize) < self.data.len());
+                let vr = self.data.get_unchecked(index as usize);
                 ValueRef {
-                    inner: Some($vr(vr)),
+                    inner: Some($vr(*vr)),
                 }
             }
         }
     };
 }
 
-impl_fixed_column!(u8, ValueRefEnum::UInt8);
-impl_fixed_column!(i8, ValueRefEnum::Int8);
-impl_fixed_column!(u16, ValueRefEnum::UInt16);
-impl_fixed_column!(i16, ValueRefEnum::Int16);
-impl_fixed_column!(u32, ValueRefEnum::UInt32);
-impl_fixed_column!(i32, ValueRefEnum::Int32);
-impl_fixed_column!(u64, ValueRefEnum::UInt64);
-impl_fixed_column!(i64, ValueRefEnum::Int64);
+#[allow(dead_code)]
+pub(crate) struct FixedArrayColumn<T> {
+    data: Vec<T>,
+    index: Vec<usize>,
+}
 
-impl_fixed_column!(u128, ValueRefEnum::UInt128);
+impl<T: Send> AsInColumn for FixedArrayColumn<T> {
+    unsafe fn get_at(&self, index: u64) -> ValueRef<'_> {
+        let size1 = if index == 0 {
+            0_usize
+        } else {
+            *self.index.get_unchecked((index - 1) as usize)
+        };
 
-impl_fixed_column!(f32, ValueRefEnum::Float32);
-impl_fixed_column!(f64, ValueRefEnum::Float64);
+        let size2 = *self.index.get_unchecked(index as usize);
+        debug_assert!(size1 <= size2);
 
-impl_fixed_column!(ValueUuid, ValueRefEnum::Uuid);
-impl_fixed_column!(ValueIp4, ValueRefEnum::Ip4);
-impl_fixed_column!(ValueIp6, ValueRefEnum::Ip6);
+        ValueRef {
+            //inner: Some( ValueRefEnum::Array( &self.data[size1..size2] ) )
+            inner: None,
+        }
+    }
+}
 
-impl_fixed_column!(ValueDecimal32, ValueRefEnum::Decimal32);
-impl_fixed_column!(ValueDecimal64, ValueRefEnum::Decimal64);
+/// LowCardinaliry data type is used to reduce the storage requirements
+/// and significantly improve query performance for String and some other data.
+/// Internally it's encoded as a dictionary with numeric keys (u8, u16, u32, or u64 type)
+/// T - key type. The current implementation supports only String data type.
+pub(crate) struct LowCardinalityColumn<T: Sized + Send> {
+    values: Vec<BoxString>,
+    data: Vec<T>,
+}
+// TODO: redesign bearing in mind 32-bit system limitations.
+// In 32-bit platforms 64-bit indexes cannot fit in memory.
+// Probably it is rare case when server will create LowCardinality column
+// with more than 2^32 keys
+impl<T> LowCardinalityColumn<T>
+where
+    T: Sized + Ord + Copy + Send + Into<u64> + 'static,
+{
+    pub(crate) async fn load_column<R>(
+        reader: R,
+        rows: u64,
+        values: FixedColumn<BoxString>,
+    ) -> Result<Box<dyn AsInColumn>>
+    where
+        R: AsyncBufRead + Unpin,
+    {
+        debug_assert!(rows > 0);
+        let data: FixedColumn<T> = FixedColumn::load_column(reader, rows).await?;
 
-impl_fixed_column!(ValueDate, ValueRefEnum::Date);
-impl_fixed_column!(ValueDateTime, ValueRefEnum::DateTime);
-impl_fixed_column!(ValueDateTime64, ValueRefEnum::DateTime64);
+        let m = data
+            .data
+            .iter()
+            .max()
+            .expect("corrupted lowcardinality column");
+
+        if (*m).into() >= values.data.len() as u64 {
+            return err!(DriverError::IntegrityError);
+        }
+
+        Ok(Box::new(LowCardinalityColumn {
+            data: data.data,
+            values: values.data,
+        }))
+    }
+}
+
+impl<T: Copy + Send + Sized + Into<u64>> AsInColumn for LowCardinalityColumn<T> {
+    unsafe fn get_at(&self, index: u64) -> ValueRef<'_> {
+        debug_assert!((index as usize) < self.data.len());
+        let index = self.data.get_unchecked(index as usize);
+        //let index: usize = (*index).try_into().unwrap_or_else(|_| 0);
+        let index: u64 = (*index).into();
+        if index == 0 {
+            ValueRef { inner: None }
+        } else {
+            ValueRef {
+                inner: Some(ValueIndex::valueref_at(self.values.as_slice(), index)),
+            }
+        }
+    }
+}
+
+// FixedColumn implementations
+// impl_fixed_column!(u8, ValueRefEnum::UInt8);
+// impl_fixed_column!(i8, ValueRefEnum::Int8);
+// impl_fixed_column!(u16, ValueRefEnum::UInt16);
+// impl_fixed_column!(i16, ValueRefEnum::Int16);
+// impl_fixed_column!(u32, ValueRefEnum::UInt32);
+// impl_fixed_column!(i32, ValueRefEnum::Int32);
+// impl_fixed_column!(u64, ValueRefEnum::UInt64);
+// impl_fixed_column!(i64, ValueRefEnum::Int64);
+// #[cfg(feature = "int128")]
+// impl_fixed_column!(u128, ValueRefEnum::UInt128);
+//
+// impl_fixed_column!(f32, ValueRefEnum::Float32);
+// impl_fixed_column!(f64, ValueRefEnum::Float64);
+//
+// impl_fixed_column!(ValueUuid, ValueRefEnum::Uuid);
+// impl_fixed_column!(ValueIp4, ValueRefEnum::Ip4);
+// impl_fixed_column!(ValueIp6, ValueRefEnum::Ip6);
+//
+// impl_fixed_column!(ValueDecimal32, ValueRefEnum::Decimal32);
+// impl_fixed_column!(ValueDecimal64, ValueRefEnum::Decimal64);
+// #[cfg(feature = "int128")]
+// impl_fixed_column!(ValueDecimal128, ValueRefEnum::Decimal128);
+//
+// impl_fixed_column!(ValueDate, ValueRefEnum::Date);
+// impl_fixed_column!(ValueDateTime, ValueRefEnum::DateTime);
+// impl_fixed_column!(ValueDateTime64, ValueRefEnum::DateTime64);

@@ -90,6 +90,9 @@ pub enum DriverError {
 
     #[error("Index out of range.")]
     IndexOutOfRange,
+
+    #[error("Integrity error")]
+    IntegrityError,
 }
 
 /// This type enumerates clickhouse data conversion  errors.
