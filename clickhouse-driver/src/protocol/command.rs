@@ -261,15 +261,18 @@ pub(crate) async fn load_nulls<R: AsyncBufRead + Unpin>(
 
 async fn load_lowcardinality_string<R>(
     mut reader: R,
-    _field: &Field,
+    field: &Field,
     rows: u64,
 ) -> Result<Box<dyn AsInColumn>>
 where
     R: AsyncBufRead + Unpin,
 {
-    if rows == 0 {
-        return Ok(Box::new(LowCardinalityColumn::<u8>::empty()));
+    if field.sql_type != SqlType::String {
+        return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
     }
+    // if rows == 0 {
+    //     return Ok(Box::new(LowCardinalityColumn::<u8>::empty()));
+    // }
     // read version number
     let mut v: u64 = reader.read_u64_le().await?;
 
@@ -304,8 +307,6 @@ where
         3 => LowCardinalityColumn::<u64>::load_column(reader, rows, keys).await,
         _ => err!(DriverError::BrokenData),
     }
-
-    //return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
 }
 
 async fn load_column<R>(mut reader: R, field: &Field, rows: u64) -> Result<Box<dyn AsInColumn>>
@@ -440,7 +441,7 @@ where
     // Read block-data (BLK)
     for col_idx in 0..block_info.cols {
         let mut rdr = ValueReader::new(reader.borrow_mut());
-
+        //
         l = rdr.read_vint().await?;
         let name: String = rdr.read_string(l).await?;
         l = rdr.read_vint().await?;
@@ -462,7 +463,9 @@ where
             return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
         }
 
-        let col = if field.is_lowcardinality() {
+        let col = if block_info.rows == 0 {
+            Box::new(()) as Box<dyn AsInColumn>
+        } else if field.is_lowcardinality() {
             load_lowcardinality_string(reader.borrow_mut(), &field, block_info.rows).await?
         } else {
             load_column(reader.borrow_mut(), &field, block_info.rows).await?

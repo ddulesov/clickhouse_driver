@@ -124,7 +124,7 @@ pub(crate) trait ServerWriter {
     fn write(&self, cx: &ServerInfo, writer: &mut dyn Write) -> io::Result<()>;
 }
 
-/// Defines proxy for Rust to dynamic sql data of Clickhouse Row value
+/// Proxy gateway from rust to dynamic sql data of Clickhouse Row value
 #[derive(Debug)]
 pub enum ValueRefEnum<'a> {
     String(&'a [u8]),

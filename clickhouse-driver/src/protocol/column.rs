@@ -45,6 +45,13 @@ pub trait AsOutColumn {
 pub trait AsInColumn: Send {
     unsafe fn get_at(&self, index: u64) -> ValueRef<'_>;
 }
+
+impl AsInColumn for () {
+    unsafe fn get_at(&self, index: u64) -> ValueRef<'_> {
+        ValueRef { inner: None }
+    }
+}
+
 /// Output block column
 pub struct ColumnDataAdapter<'b> {
     pub(crate) name: &'b str,
@@ -316,90 +323,6 @@ impl<'a, C: AsInColumn + ?Sized + 'a> AsInColumn for Box<C> {
 }
 
 pub(crate) type BoxString = Box<[u8]>;
-/*
-/// Column of String, FixedString
-pub(crate) struct StringColumn {
-    data: Vec<BoxString>,
-}
-
-pub(crate) struct StringNullColumn{
-    inner: StringColumn,
-    pub(crate) nulls: Vec<u8>,
-}
-
-impl StringColumn {
-    pub(crate) fn set_nulls(self:  Self, nulls: Option<Vec<u8>>)->Box<dyn AsInColumn>{
-        if let Some(nulls) = nulls {
-            Box::new( StringNullColumn{inner: self, nulls} )
-        }else{
-            Box::new( self)
-        }
-    }
-
-    pub(crate) async fn load_string_column<R: AsyncBufRead + Unpin>(
-        reader: R,
-        rows: u64
-    ) -> Result<StringColumn> {
-        let mut data: Vec<BoxString> = Vec::with_capacity(rows as usize);
-
-        let mut rdr = ValueReader::new(reader);
-        let mut l: u64;
-        for _ in 0..rows {
-            l = rdr.read_vint().await?;
-            let s: Vec<u8> = rdr.read_string(l).await?;
-            data.push(s.into_boxed_slice());
-        }
-
-        Ok(StringColumn { data })
-    }
-
-    pub(crate) async fn load_fixed_string_column<R: AsyncBufRead + Unpin>(
-        mut reader: R,
-        rows: u64,
-        width: u32
-    ) -> Result<StringColumn> {
-        let mut data: Vec<BoxString> = Vec::with_capacity(rows as usize);
-
-        for _ in 0..rows {
-            let mut s: Vec<u8> = Vec::with_capacity(width as usize);
-            unsafe {
-                s.set_len(width as usize);
-            }
-            reader.read_exact(s.as_mut_slice()).await?;
-            data.push(s.into_boxed_slice());
-        }
-
-        Ok(StringColumn { data })
-    }
-}
-
-impl AsInColumn for StringColumn {
-
-    unsafe fn get_at(&self, index: u64, _: &Field) -> ValueRef<'_> {
-        assert!((index as usize) < self.data.len());
-        let vr = self.data.get_unchecked(index as usize);
-        //let vr = self.data[index as usize];
-
-        ValueRef {
-            inner: Some(ValueRefEnum::String(vr)),
-        }
-    }
-}
-
-impl AsInColumn for StringNullColumn {
-
-    unsafe fn get_at<'a>(&'a self, index: u64, field: &'a Field) -> ValueRef<'a> {
-        debug_assert!((index as usize) < self.nulls.len());
-        if *(self.nulls.get_unchecked( index as usize ))==1{
-            ValueRef {
-                inner: None
-            }
-        }else {
-            self.inner.get_at(index, &field )
-        }
-    }
-}
-*/
 
 /// Enum value, String index pair,
 /// 0-T, clickhouse value
@@ -506,6 +429,7 @@ impl<'a, T: Copy + Send + Into<i16>> AsInColumn for EnumColumn<T> {
         }
     }
 }
+
 /// Fixed sized type column
 pub(crate) struct FixedColumn<T: Sized> {
     data: Vec<T>,
@@ -657,7 +581,6 @@ macro_rules! impl_fixed_column {
 pub(crate) struct FixedArrayColumn<T> {
     data: Vec<T>,
     index: Vec<usize>,
-    //phantom: PhantomData<T>
 }
 
 impl<T: Send> AsInColumn for FixedArrayColumn<T> {

@@ -121,7 +121,9 @@ async fn test_query_lowcardinality() -> errors::Result<()> {
     let pool = get_pool();
     let mut conn = pool.connection().await?;
 
-    let mut query_result = conn.query("SELECT lcs FROM main WHERE lcs='May' LIMIT 1000").await?;
+    let mut query_result = conn
+        .query("SELECT lcs FROM main WHERE lcs='May' LIMIT 1000")
+        .await?;
 
     while let Some(block) = query_result.next().await? {
         for row in block.iter_rows() {
