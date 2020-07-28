@@ -52,7 +52,10 @@ impl<'a, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> InsertSink<'a, R, W> {
             columns,
         }
     }
-    /// Send block of data to Clickhouse server
+    /// Send another block of data to Clickhouse server.
+    /// It's part of streamed insert API.
+    /// Streamed insert is the most effective method when you need
+    /// to load into server huge data .
     pub async fn next(&mut self, data: &Block<'_>) -> Result<()> {
         self.buf.clear();
         // The number of Columns must be the same!
@@ -60,7 +63,7 @@ impl<'a, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> InsertSink<'a, R, W> {
         if data.column_count() != self.columns.len() {
             return Err(DriverError::BrokenData.into());
         }
-        // TODO split huge block on chunks less then MAX_BLOCK_SIZE size each
+        // TODO: split huge block on chunks less then MAX_BLOCK_SIZE size each
         // Now the caller responsible to split data
         if data.row_count() > crate::MAX_BLOCK_SIZE {
             return Err(DriverError::BrokenData.into());
@@ -78,7 +81,7 @@ impl<'a, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> InsertSink<'a, R, W> {
             return Err(ConversionError::UnsupportedConversion.into());
         }
 
-        // TODO get rid of intermediate buffer. Write block right into stream
+        // TODO: get rid of intermediate buffer. Write block right into stream
         OutputBlockWrapper {
             columns: &self.columns,
             inner: data,
@@ -93,7 +96,7 @@ impl<'a, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> InsertSink<'a, R, W> {
     }
     /// Commits  last inserted blocks returning server insert status.
     /// @note. Clickhouse does not support ASID transactions.
-    /// You don't have a way to revert a transaction.
+    /// There is no way to revert a transaction.
     /// Commit just allow to get status of previously inserted blocks.
     /// If it returns an error, you can send last blocks again.
     /// Clickhouse keeps hashes of last 100 blocks. So you can safely

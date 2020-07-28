@@ -23,9 +23,8 @@ lazy_static! {
     };
 }
 
-//TODO rename trait and method `to_column`
-pub(crate) trait ToColumn {
-    fn to_column(&self, field: &Field, writer: &mut dyn Write) -> Result<()>;
+pub(crate) trait WriteColumn {
+    fn write_column(&self, field: &Field, writer: &mut dyn Write) -> Result<()>;
 }
 
 struct SimpleOutputColumn<T, F: Fn(&Field) -> bool> {
@@ -35,7 +34,7 @@ struct SimpleOutputColumn<T, F: Fn(&Field) -> bool> {
 
 impl<T, F> AsOutColumn for SimpleOutputColumn<T, F>
 where
-    T: ToColumn,
+    T: WriteColumn,
     F: Fn(&Field) -> bool,
 {
     fn len(&self) -> usize {
@@ -44,7 +43,7 @@ where
 
     fn encode(&self, field: &Field, writer: &mut dyn Write) -> Result<()> {
         for item in self.data.iter() {
-            <T as ToColumn>::to_column(item, field, writer)?;
+            <T as WriteColumn>::write_column(item, field, writer)?;
         }
         Ok(())
     }
@@ -53,7 +52,7 @@ where
         (&self.f)(field)
     }
 }
-
+/// Null default value
 pub trait NullValue {
     fn null() -> Self;
 }
@@ -95,7 +94,7 @@ impl_null!(String, Default::default());
 
 impl<T, F> AsOutColumn for SimpleOutputColumn<Option<T>, F>
 where
-    T: ToColumn + NullValue,
+    T: WriteColumn + NullValue,
     F: Fn(&Field) -> bool,
 {
     fn len(&self) -> usize {
@@ -104,7 +103,7 @@ where
     /// Encodes null flags then encode data
     /// Null values are encoded as ordinary ones received by calling NullValue::null()
     fn encode(&self, field: &Field, writer: &mut dyn Write) -> Result<()> {
-        // TODO: Compare a performance with single pass encoder.
+        // TODO: Compare its performance with single pass encoder.
         // Here we iterate over data twice. We have to do it because nulls are serialized first.
         // However we can serialize values in second buffer and then append it to the output stream
         for item in self
@@ -116,7 +115,7 @@ where
         }
         let def: T = NullValue::null();
         for item in self.data.iter() {
-            <T as ToColumn>::to_column(item.as_ref().unwrap_or(&def), field, writer)?;
+            <T as WriteColumn>::write_column(item.as_ref().unwrap_or(&def), field, writer)?;
         }
         Ok(())
     }
@@ -128,9 +127,9 @@ where
 
 /// Default string encoder implementation
 /// It's used by nullable string
-impl ToColumn for &str {
+impl WriteColumn for &str {
     #[inline]
-    fn to_column(&self, field: &Field, writer: &mut dyn Write) -> Result<()> {
+    fn write_column(&self, field: &Field, writer: &mut dyn Write) -> Result<()> {
         let slice = std::slice::from_ref(self);
         match field.sql_type {
             SqlType::String => encode_string(slice, writer),
@@ -139,9 +138,9 @@ impl ToColumn for &str {
         }
     }
 }
-impl ToColumn for String {
+impl WriteColumn for String {
     #[inline]
-    fn to_column(&self, field: &Field, writer: &mut dyn Write) -> Result<()> {
+    fn write_column(&self, field: &Field, writer: &mut dyn Write) -> Result<()> {
         let slice = std::slice::from_ref(self);
         match field.sql_type {
             SqlType::String => encode_string(slice, writer),
@@ -240,8 +239,8 @@ where
     }
 }
 /// IPv4 output column
-impl ToColumn for Ipv4Addr {
-    fn to_column(&self, _field: &Field, writer: &mut dyn Write) -> Result<()> {
+impl WriteColumn for Ipv4Addr {
+    fn write_column(&self, _field: &Field, writer: &mut dyn Write) -> Result<()> {
         let mut b = self.octets();
         b.reverse();
 
@@ -249,15 +248,15 @@ impl ToColumn for Ipv4Addr {
     }
 }
 /// IPv6 output column
-impl ToColumn for Ipv6Addr {
-    fn to_column(&self, _field: &Field, writer: &mut dyn Write) -> Result<()> {
+impl WriteColumn for Ipv6Addr {
+    fn write_column(&self, _field: &Field, writer: &mut dyn Write) -> Result<()> {
         let b = self.octets();
         writer.write_all(&b[..]).map_err(Into::into)
     }
 }
 /// UUID output column
-impl ToColumn for Uuid {
-    fn to_column(&self, _field: &Field, writer: &mut dyn Write) -> Result<()> {
+impl WriteColumn for Uuid {
+    fn write_column(&self, _field: &Field, writer: &mut dyn Write) -> Result<()> {
         let i = self.as_u128();
         writer.write_u64::<LittleEndian>((i >> 64) as u64)?;
         writer
@@ -266,8 +265,8 @@ impl ToColumn for Uuid {
     }
 }
 /// Data output column
-impl ToColumn for Date<Utc> {
-    fn to_column(&self, _field: &Field, writer: &mut dyn Write) -> Result<()> {
+impl WriteColumn for Date<Utc> {
+    fn write_column(&self, _field: &Field, writer: &mut dyn Write) -> Result<()> {
         let days = (self.naive_utc() - *EPOCH).num_days();
 
         if days < 0 || days > u16::MAX as i64 {
@@ -279,8 +278,8 @@ impl ToColumn for Date<Utc> {
     }
 }
 /// DataTime and DateTime64 output column
-impl ToColumn for DateTime<Utc> {
-    fn to_column(&self, field: &Field, writer: &mut dyn Write) -> Result<()> {
+impl WriteColumn for DateTime<Utc> {
+    fn write_column(&self, field: &Field, writer: &mut dyn Write) -> Result<()> {
         let mut timestamp = self.timestamp();
 
         match field.sql_type {
@@ -293,7 +292,7 @@ impl ToColumn for DateTime<Utc> {
             }
             SqlType::DateTime64(p, _) => {
                 debug_assert!(p < 9);
-                //TODO refine getting value
+                // TODO: refine getting value. DateTime(self) has higher precision than timestamp
                 timestamp *= SCALE[p as usize];
                 writer
                     .write_i64::<LittleEndian>(timestamp)
@@ -306,17 +305,17 @@ impl ToColumn for DateTime<Utc> {
 
 macro_rules! to_column_numeric {
     ($t:ty, $f: ident, $endian: ty) => {
-        impl ToColumn for $t {
+        impl WriteColumn for $t {
             #[inline]
-            fn to_column(&self, _field: &Field, writer: &mut dyn Write) -> Result<()> {
+            fn write_column(&self, _field: &Field, writer: &mut dyn Write) -> Result<()> {
                 writer.$f::<$endian>(*self).map_err(Into::into)
             }
         }
     };
     ($t:ty, $f: ident) => {
-        impl ToColumn for $t {
+        impl WriteColumn for $t {
             #[inline]
-            fn to_column(&self, _field: &Field, writer: &mut dyn Write) -> Result<()> {
+            fn write_column(&self, _field: &Field, writer: &mut dyn Write) -> Result<()> {
                 writer.$f(*self).map_err(Into::into)
             }
         }
@@ -341,8 +340,8 @@ to_column_numeric!(f32, write_f32, LittleEndian);
 to_column_numeric!(f64, write_f64, LittleEndian);
 
 /// Decimal output column
-impl<T: ToColumn + DecimalBits> ToColumn for Decimal<T> {
-    fn to_column(&self, field: &Field, writer: &mut dyn Write) -> Result<()> {
+impl<T: WriteColumn + DecimalBits> WriteColumn for Decimal<T> {
+    fn write_column(&self, field: &Field, writer: &mut dyn Write) -> Result<()> {
         if let SqlType::Decimal(p, s) = field.sql_type {
             debug_assert!(T::fit(p));
             if s != self.scale {
@@ -351,7 +350,7 @@ impl<T: ToColumn + DecimalBits> ToColumn for Decimal<T> {
         } else {
             unreachable!()
         }
-        self.underlying.to_column(field, writer)
+        self.underlying.write_column(field, writer)
     }
 }
 
@@ -589,7 +588,7 @@ impl ValueDateTime64 {
     pub(super) fn to_datetime(self, precision: u8) -> DateTime<chrono::offset::Utc> {
         let magnitude = SCALE[precision as usize];
         let sec = self.0.wrapping_div(magnitude);
-        //TODO: verify correctness for dates below 1970-01-01, that is negative self.0 value
+        // TODO: check whether it is correct for dates below 1970-01-01, that is negative self.0 value
         let nsec = self.0.wrapping_rem(magnitude) * SCALE[(9 - precision) as usize];
 
         let nt = NaiveDateTime::from_timestamp(sec, nsec as u32);

@@ -232,7 +232,7 @@ mod test {
     use super::Field;
     use crate::protocol::column::EnumIndex;
     use crate::protocol::encoder::Encoder;
-    use crate::types::{FieldMeta, SqlType, FIELD_NONE};
+    use crate::types::{FieldMeta, SqlType, FIELD_NONE, FIELD_NULLABLE};
 
     macro_rules! into_boxed {
         ($s: expr) => {
@@ -262,7 +262,7 @@ mod test {
         let mut buf = Vec::new();
         let f = Field {
             sql_type: SqlType::String,
-            flag: FIELD_NONE,
+            flag: FIELD_NULLABLE,
             meta: None,
         };
         f.encode(&mut buf).unwrap();
@@ -274,7 +274,7 @@ mod test {
         let mut buf = Vec::new();
         let f = Field {
             sql_type: SqlType::FixedString(20),
-            flag: FIELD_NONE,
+            flag: FIELD_NULLABLE,
             meta: None,
         };
         f.encode(&mut buf).unwrap();
@@ -282,7 +282,7 @@ mod test {
         buf.clear();
         let f = Field {
             sql_type: SqlType::Decimal(18, 4),
-            flag: FIELD_NONE,
+            flag: FIELD_NULLABLE,
             meta: None,
         };
         f.encode(&mut buf).unwrap();

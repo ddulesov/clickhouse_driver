@@ -2,9 +2,11 @@
 [![Build Status](https://travis-ci.org/ddulesov/clickhouse_driver.svg?branch=master)](https://travis-ci.org/ddulesov/clickhouse_driver)
 ![Rust](https://github.com/ddulesov/clickhouse_driver/workflows/Rust/badge.svg?branch=master)
 
-Asynchronous tokio-based pure rust Clickhouse client library 
+Asynchronous pure rust tokio-based  Clickhouse client library 
  
-*current status: alpha* 
+development status: **alpha** 
+
+Tested on Linux x86-64 (ubuntu 20.04 LTS), Windows 10.
 
 ### Why ###
 
@@ -41,13 +43,17 @@ The package has not published in crates.io.
 Download source from [home git](https://github.com/ddulesov/clickhouse_driver)
 
 - Add dependencies to Cargo.toml 
-
+  ```toml   
   clickhouse-driver = { version="0.1.0-alpha.1", path="../path_to_package"}
-
+  clickhouse-driver-lz4 = { version="0.1.0", path="../path_to_package"}
+  clickhouse-driver-cthrs = { version="0.1.0", path="../path_to_package"}
+  ```
 - Add usage in main.rs
-
+  ```rust
+  extern crate clickhouse_driver;   
   use clickhouse_driver::prelude::*;
-
+  ```
+  
 to connect to server provide connection url 
 ```
 tcp://username:password@localhost/database?paramname=paramvalue&...
@@ -65,13 +71,13 @@ tcp://user:default@localhost/log?ping_timout=200ms&execute_timeout=5s&query_time
 * `connection_timeout` - timeout for establishing connection.
    Default is 500ms;
        
-* `execute_timeout` - timeout for waiting result of `execute` method call
+* `execute_timeout` - timeout for waiting result of **execute** method call
    If the execute  used for alter huge table it can take 
    long time to complete. In this case  set this parameter to appropriate
    value. In other cases leave the  default value (180 sec);
       
 * `query_timout` - timeout for waiting response from the server with
-   next block of data in `query` call.
+   next block of data in **query** call.
    Note. Large data query may take long time. This timeout requires that only 
    one chunk of data will receive until the end of timeout.
    Default value is 180sec;
@@ -190,7 +196,8 @@ async fn main() -> Result<(), io::Error> {
 
 ### Known issues and limitations ###
 
-* Doesn't support Array data type, LowCardinality
+* Doesn't support Array data type, 
+* LowCardinality - readonly and just String base type
 * Insert method support only limited data types 
   `insert` requires that inserted data  exactly matches table column type
    - Int8(16|32|64)  - i8(16|32|64)
@@ -207,10 +214,10 @@ async fn main() -> Result<(), io::Error> {
    
 ### In the future
 
-* Array column data type - not supported yet
-* Tuple - not supported yet
-* AggregateFunction - not supported
-* LowCardinality - not supported   
+* Array column data type - read/write support 
+* Tuple - will never be supported 
+* AggregateFunction - will never be supported
+* LowCardinality - write support   
     
    
    

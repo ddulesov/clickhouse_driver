@@ -20,6 +20,7 @@ macro_rules! add_col {
 }
 
 impl Query {
+    /// Construct `INSERT` statement from Block columns names
     pub(crate) fn from_block(block: &Block) -> Query {
         let mut query: String = format!("INSERT INTO {} (", block.table);
         query.reserve(256);

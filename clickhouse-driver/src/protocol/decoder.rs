@@ -153,11 +153,11 @@ impl<R: AsyncRead> ValueReader<R> {
     pub(super) fn new(reader: R) -> ValueReader<R> {
         ValueReader { inner: reader }
     }
-    //TODO: Optimize read using bufered data
+    //TODO: Optimize read using buffered data
     pub(super) fn read_vint(&mut self) -> ReadVInt<'_, R> {
         ReadVInt::new(&mut self.inner)
     }
-    //TODO: Optimize read using bufered data
+    //TODO: Optimize read using buffered data
     pub(super) fn read_string<T: FromBytes>(&mut self, len: u64) -> ReadVString<'_, T, R> {
         ReadVString::new(&mut self.inner, len as usize)
     }

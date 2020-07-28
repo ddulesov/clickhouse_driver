@@ -54,6 +54,7 @@ required-features = ["cityhash_rs"]
 name = "select"
 required-features = ["cityhash_rs"]
 
+
 [[test]]
 name = "pool"
 

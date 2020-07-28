@@ -92,7 +92,7 @@ enum CompressionState {
 }
 
 pub(crate) struct LZ4ReadAdapter<R: AsyncBufRead + ?Sized> {
-    //TODO optimize out
+    // TODO: optimize out. Use underlying reader buffer to read first  16(hash)+9(head)
     hash: [u8; 16],
     state: CompressionState,
     length: usize,
@@ -132,7 +132,7 @@ impl<R: AsyncBufRead + Unpin> LZ4ReadAdapter<R> {
                         debug_assert_eq!(self.length, 16);
 
                         let v = unsafe {
-                            let mut v = Vec::with_capacity(4096);
+                            let mut v = Vec::with_capacity(16);
                             v.set_len(9);
                             v
                         };
@@ -198,7 +198,7 @@ impl<R: AsyncBufRead + Unpin> LZ4ReadAdapter<R> {
                                 )));
                             }
                             self.length = 0;
-                            //TODO: decompression in-place
+                            // TODO: decompression in-place
                             let mut orig: Vec<u8> = Vec::with_capacity(*decompressed as usize);
                             unsafe {
                                 orig.set_len(*decompressed as usize);

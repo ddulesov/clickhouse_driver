@@ -104,8 +104,8 @@ pub mod query;
 pub mod value;
 
 #[derive(Copy, Clone, PartialEq, Debug)]
-/// At the moment we support only LZ4 compression method
-/// It's used by default Clickhouse 20.x
+/// At the moment Clickhouse_driver supports only LZ4 compression method.
+/// It's used by default in Clickhouse 20.x
 pub enum CompressionMethod {
     None,
     LZ4,
@@ -117,9 +117,9 @@ impl CompressionMethod {
         matches!(self, CompressionMethod::None)
     }
 }
-/// A trait for provide common interface for client request serialization
+/// This trait provides common interface for client request serialization.
 /// ServerInfo parameter keeps server specific options (revision, compression method ...)
-/// and defines encoded rules and version specific options
+/// and defines encoded rules, version specific options, and timezone.
 pub(crate) trait ServerWriter {
     fn write(&self, cx: &ServerInfo, writer: &mut dyn Write) -> io::Result<()>;
 }

@@ -1,0 +1,11 @@
+[package]
+name = "clickhouse-rs-bench"
+version = "0.1.0"
+authors = ["dmitry dulesov <dmitry.dulesov@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+clickhouse-rs={ version = "0.2.0-alpha.5", features=["tokio_io"] }
+tokio={version="0.2", features = ["full"]}
+chrono = { version="^0.4" }
+chrono-tz={ version = "0.5" }

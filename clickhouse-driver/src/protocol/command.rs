@@ -158,7 +158,7 @@ impl<'a, R: AsyncRead + Unpin> ResponseStream<'a, R> {
 
                     Pin::new(self.reader.borrow_mut()).consume(l as usize);
 
-                    //TODO: read_block from `dyn AsyncRead`
+                    // TODO: simplify and standardize read_block. Make it first parameter  `dyn AsyncRead`
 
                     let resp = (if self.info.compression == CompressionMethod::LZ4 {
                         let mut lz4 = LZ4ReadAdapter::new(self.reader.borrow_mut());
@@ -273,6 +273,7 @@ where
     // if rows == 0 {
     //     return Ok(Box::new(LowCardinalityColumn::<u8>::empty()));
     // }
+
     // read version number
     let mut v: u64 = reader.read_u64_le().await?;
 
@@ -318,7 +319,8 @@ where
     } else {
         None
     };
-
+    // SqlType-to-Loader dispatch implementation
+    // TODO: rewrite as Fabric method
     let col: Box<dyn AsInColumn> = match field.sql_type {
         SqlType::String => StringColumn::load_string_column(reader, rows)
             .await?
@@ -441,9 +443,10 @@ where
     // Read block-data (BLK)
     for col_idx in 0..block_info.cols {
         let mut rdr = ValueReader::new(reader.borrow_mut());
-        //
+        // Read FNM
         l = rdr.read_vint().await?;
         let name: String = rdr.read_string(l).await?;
+        // Read TNM
         l = rdr.read_vint().await?;
         let field: String = rdr.read_string(l).await?;
         // TODO. Verify is every query block has the same order of columns?
@@ -462,7 +465,7 @@ where
         } else if field.is_lowcardinality() && field.sql_type != SqlType::String {
             return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
         }
-
+        // Read DATA
         let col = if block_info.rows == 0 {
             Box::new(()) as Box<dyn AsInColumn>
         } else if field.is_lowcardinality() {
@@ -470,7 +473,7 @@ where
         } else {
             load_column(reader.borrow_mut(), &field, block_info.rows).await?
         };
-
+        // Append column to the list of block column adapters (dyn AsInColunm interface)
         block_columns.push(BlockColumn {
             data: col,
             header: BlockColumnHeader { field, name },
