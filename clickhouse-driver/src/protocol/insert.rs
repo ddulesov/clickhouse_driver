@@ -12,7 +12,7 @@ use crate::protocol::column::{ColumnDataAdapter, EnumIndex};
 
 const DEFAULT_INSERT_BUFFER_SIZE: usize = 8 * 1024;
 
-pub struct InsertSink<'a, R: AsyncRead, W> {
+pub struct InsertSink<'a, R: AsyncRead + Unpin + Send, W> {
     pub(crate) inner: ResponseStream<'a, R>,
     pub(crate) sink: CommandSink<W>,
     pub(crate) buf: Vec<u8>,
@@ -21,13 +21,13 @@ pub struct InsertSink<'a, R: AsyncRead, W> {
     pub(crate) columns: Vec<BlockColumnHeader>,
 }
 
-impl<'a, R: AsyncRead, W> Drop for InsertSink<'a, R, W> {
+impl<'a, R: AsyncRead + Unpin + Send, W> Drop for InsertSink<'a, R, W> {
     fn drop(&mut self) {
         self.inner.clear_pending()
     }
 }
 
-impl<'a, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> InsertSink<'a, R, W> {
+impl<'a, R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin> InsertSink<'a, R, W> {
     pub(crate) fn new(
         tcpstream: ResponseStream<'a, R>,
         sink: CommandSink<W>,

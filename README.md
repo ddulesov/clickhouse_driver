@@ -42,6 +42,9 @@ Tested on Linux x86-64 (ubuntu 20.04 LTS), Windows 10.
 The package has not published in crates.io.
 Download source from [home git](https://github.com/ddulesov/clickhouse_driver)
 
+Building requires rust 1.41 stable or nightly,
+tokio-0.2.x.
+
 - Add dependencies to Cargo.toml 
   ```toml   
   clickhouse-driver = { version="0.1.0-alpha.1", path="../path_to_package"}
@@ -212,13 +215,13 @@ async fn main() -> Result<(), io::Error> {
    - String - &str or String or &[u8]
    - Enum8|16 - &str or String
    
-### In the future
+### Roadmap
 
-* Array column data type - read/write support 
-* Tuple - will never be supported 
-* AggregateFunction - will never be supported
-* LowCardinality - write support   
-    
+* Array column data type - read/write  
+* Tuple - no plans to  support 
+* AggregateFunction - no plans to support
+* LowCardinality - add write support, extend feature to Date, DateTime types   
+* Serde - serializer/deserializer interface    
    
    
   

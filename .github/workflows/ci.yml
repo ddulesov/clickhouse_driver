@@ -33,7 +33,9 @@ jobs:
     - name: Run Clippy
       run: cargo clippy --all-targets
     - name: Run Tests
-      run: cargo test --all 
+      run: cargo test --all
+    - name: Build Examples
+      run: cargo build --examples 
     - name: Int128 Build
       run: |
         cd clickhouse-driver

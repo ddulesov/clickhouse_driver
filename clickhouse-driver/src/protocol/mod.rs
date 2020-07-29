@@ -103,20 +103,6 @@ pub mod packet;
 pub mod query;
 pub mod value;
 
-#[derive(Copy, Clone, PartialEq, Debug)]
-/// At the moment Clickhouse_driver supports only LZ4 compression method.
-/// It's used by default in Clickhouse 20.x
-pub enum CompressionMethod {
-    None,
-    LZ4,
-}
-
-impl CompressionMethod {
-    #[inline(always)]
-    pub fn is_none(&self) -> bool {
-        matches!(self, CompressionMethod::None)
-    }
-}
 /// This trait provides common interface for client request serialization.
 /// ServerInfo parameter keeps server specific options (revision, compression method ...)
 /// and defines encoded rules, version specific options, and timezone.
@@ -124,7 +110,21 @@ pub(crate) trait ServerWriter {
     fn write(&self, cx: &ServerInfo, writer: &mut dyn Write) -> io::Result<()>;
 }
 
-/// Proxy gateway from rust to dynamic sql data of Clickhouse Row value
+/// Read the RIP register (instruction pointer).
+/// Used to detect code duplicates
+#[cfg(rustc_nightly)]
+#[feature(asm)]
+#[allow(dead_code)]
+#[inline(always)]
+pub(crate) fn rip() -> u64 {
+    let rip: u64;
+    unsafe {
+        asm!("lea {}, 0[rip]", out(reg) rip);
+    }
+    rip
+}
+
+/// Gateway from rust to dynamic sql data of Clickhouse Row
 #[derive(Debug)]
 pub enum ValueRefEnum<'a> {
     String(&'a [u8]),

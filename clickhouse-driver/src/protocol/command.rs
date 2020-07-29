@@ -13,9 +13,10 @@ use super::column::{AsInColumn, EnumColumn, FixedColumn, StringColumn};
 use super::encoder::Encoder;
 use super::packet::{ProfileInfo, Response};
 use super::value::{ValueDate, ValueDateTime, ValueDateTime64, ValueIp4, ValueIp6, ValueUuid};
-use super::{CompressionMethod, ServerInfo};
+use super::ServerInfo;
 use crate::compression::LZ4ReadAdapter;
 use crate::errors::{self, DriverError, Exception, Result, ServerError};
+use crate::pool::CompressionMethod;
 use crate::protocol::column::{BoxString, LowCardinalityColumn};
 use crate::protocol::decoder::ValueReader;
 #[cfg(feature = "int128")]
@@ -33,6 +34,7 @@ const GLOBAL_DICTIONARY: u64 = 0x0100;
 const ADDITIONAL_KEY: u64 = 0x0200;
 //const UPDATE_KEY: u64 = 0x0400;
 
+/// Wait future result with timeout
 pub(crate) async fn with_timeout<F, T, E>(fut: F, timeout: Duration) -> Result<T>
 where
     F: Future<Output = std::result::Result<T, E>>,
@@ -40,8 +42,8 @@ where
 {
     match time::timeout(timeout, fut).await {
         Ok(Ok(res)) => Ok(res),
-        Ok(Err(e)) => Err(e.into()),
-        Err(_) => Err(crate::errors::DriverError::ConnectionTimeout.into()),
+        Ok(Err(e)) => err!(e),
+        Err(_) => err!(crate::errors::DriverError::ConnectionTimeout),
     }
 }
 
@@ -69,21 +71,11 @@ pub(crate) struct ResponseStream<'a, R: AsyncRead> {
     fuse: bool,
     pub(crate) skip_empty: bool,
     info: &'a mut ServerInfo,
-    reader: BufReader<R>,
+    reader: LZ4ReadAdapter<BufReader<R>>,
     columns: Vec<BlockColumnHeader>,
 }
 
-impl<'a, R: AsyncRead> ResponseStream<'a, R> {
-    pub(crate) fn new(tcpstream: R, info: &'a mut ServerInfo) -> ResponseStream<'a, R> {
-        ResponseStream {
-            info,
-            skip_empty: true,
-            fuse: false,
-            reader: BufReader::new(tcpstream),
-            columns: Vec::new(),
-        }
-    }
-
+impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
     pub(crate) fn info_ref(&self) -> &ServerInfo {
         self.info
     }
@@ -97,7 +89,7 @@ impl<'a, R: AsyncRead> ResponseStream<'a, R> {
             fuse: false,
             skip_empty: true,
             info,
-            reader: BufReader::with_capacity(capacity, tcpstream),
+            reader: LZ4ReadAdapter::new(BufReader::with_capacity(capacity, tcpstream)),
             columns: Vec::new(),
         }
     }
@@ -127,47 +119,44 @@ impl<'a, R: AsyncRead> ResponseStream<'a, R> {
     }
 }
 
-impl<'a, R: AsyncRead + Unpin> ResponseStream<'a, R> {
+impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
     async fn inner_next(&mut self) -> Result<Option<Response>> {
         if self.fuse {
             return Ok(None);
         }
+
         let mut code = [0u8; 1];
         loop {
-            if 0 == self.reader.read(&mut code[..]).await? {
+            if 0 == self.reader.inner_ref().read(&mut code[..]).await? {
                 return Ok(None);
             }
 
-            let code = code[0] as u64;
-
-            match code {
-                _code @ SERVER_PONG => {
+            match code[0] as u64 {
+                SERVER_PONG => {
                     return Ok(Some(Response::Pong));
                 }
-                _code @ SERVER_END_OF_STREAM => {
+                SERVER_END_OF_STREAM => {
                     self.set_fuse();
                     break;
                 }
-                _code @ SERVER_PROFILE_INFO => {
-                    let _profile = read_profile(self.reader.borrow_mut()).await?;
+                SERVER_PROFILE_INFO => {
+                    let _profile = read_profile(self.reader.inner_ref()).await?;
                 }
-                _code @ SERVER_DATA => {
+                SERVER_DATA => {
                     // Skip temporary table name
-                    let mut rdr = ValueReader::new(self.reader.borrow_mut());
+                    let mut rdr = ValueReader::new(self.reader.inner_ref());
                     let l = rdr.read_vint().await?;
 
-                    Pin::new(self.reader.borrow_mut()).consume(l as usize);
+                    Pin::new(self.reader.inner_ref()).consume(l as usize);
 
-                    // TODO: simplify and standardize read_block. Make it first parameter  `dyn AsyncRead`
+                    let reader: &mut (dyn AsyncBufRead + Unpin + Send) =
+                        if self.info.compression == CompressionMethod::LZ4 {
+                            &mut self.reader as &mut (dyn AsyncBufRead + Unpin + Send)
+                        } else {
+                            self.reader.inner_ref() as &mut (dyn AsyncBufRead + Unpin + Send)
+                        };
 
-                    let resp = (if self.info.compression == CompressionMethod::LZ4 {
-                        let mut lz4 = LZ4ReadAdapter::new(self.reader.borrow_mut());
-
-                        read_block(&mut lz4, &self.columns, self.info.timezone).await
-                    } else {
-                        read_block(self.reader.borrow_mut(), &self.columns, self.info.timezone)
-                            .await
-                    })?;
+                    let resp = read_block(reader, &self.columns, self.info.timezone).await?;
 
                     if let Some(block) = resp {
                         //block.stream = Some(self);
@@ -182,28 +171,27 @@ impl<'a, R: AsyncRead + Unpin> ResponseStream<'a, R> {
                         continue;
                     }
                 }
-                _code @ SERVER_EXCEPTION => {
+                SERVER_EXCEPTION => {
                     self.set_fuse();
-                    let ex = read_exception(self.reader.borrow_mut()).await?;
-                    return Err(ServerError(ex).into());
+                    let ex = read_exception(self.reader.inner_ref()).await?;
+                    return err!(ServerError(ex));
                 }
-                _code @ SERVER_HELLO => {
+                SERVER_HELLO => {
                     self.set_fuse();
-                    return Ok(Some(read_hello(self.reader.borrow_mut()).await?));
+                    return Ok(Some(read_hello(self.reader.inner_ref()).await?));
                 }
-                _code @ SERVER_PROGRESS => {
+                SERVER_PROGRESS => {
                     let revision = self.info.revision;
                     let (_rows, _bytes, _total) =
-                        read_progress(self.reader.borrow_mut(), revision).await?;
+                        read_progress(self.reader.inner_ref(), revision).await?;
                 }
                 code => {
                     self.set_fuse();
 
-                    return Err(DriverError::UnexpectedPacket {
+                    return err!(DriverError::UnexpectedPacket {
                         code,
-                        payload: self.reader.buffer().to_vec(),
-                    }
-                    .into());
+                        payload: self.reader.inner_ref().buffer().to_vec(),
+                    });
                 }
             };
         }
@@ -235,7 +223,7 @@ where
     let rows: u64 = rdr.read_vint().await?;
 
     if cols > (u16::MAX as u64) || rows > (crate::MAX_BLOCK_SIZE as u64) {
-        return Err(DriverError::RowCountTooMany(rows).into());
+        return err!(DriverError::RowCountTooMany(rows));
     }
 
     Ok(BlockInfo {
@@ -431,6 +419,7 @@ where
     // Read block-info (BI)
     let block_info = read_block_info(reader.borrow_mut()).await?;
     // Shortcut parse time for empty block but return header-only to caller
+    // dbg!( rip() );
     if block_info.is_empty() {
         return Ok(None);
     }

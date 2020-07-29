@@ -35,7 +35,6 @@
 //! - default database: "default"
 //!
 //!
-
 #![recursion_limit = "128"]
 extern crate byteorder;
 extern crate chrono;
