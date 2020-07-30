@@ -735,6 +735,7 @@ where
     }
 }
 
+
 impl<T: Copy + Send + Sized + Into<u64>> AsInColumn for LowCardinalityColumn<T> {
     unsafe fn get_at(&self, index: u64) -> ValueRef<'_> {
         debug_assert!((index as usize) < self.data.len());

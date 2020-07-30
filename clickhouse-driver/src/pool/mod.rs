@@ -284,6 +284,7 @@ impl Pool {
         util::AddrIter::new(inner.hosts.as_slice(), index, self.options().send_retries)
     }
 
+    #[inline]
     pub fn options(&self) -> &Options {
         &self.inner.options
     }

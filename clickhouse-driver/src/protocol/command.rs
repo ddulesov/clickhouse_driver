@@ -133,6 +133,7 @@ impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
 
             match code[0] as u64 {
                 SERVER_PONG => {
+
                     return Ok(Some(Response::Pong));
                 }
                 SERVER_END_OF_STREAM => {
@@ -157,6 +158,7 @@ impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
                         };
 
                     let resp = read_block(reader, &self.columns, self.info.timezone).await?;
+
 
                     if let Some(block) = resp {
                         if self.skip_empty && block.rows == 0 {
@@ -257,6 +259,7 @@ where
     if field.sql_type != SqlType::String {
         return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
     }
+
     // Read version number
     let mut v: u64 = reader.read_u64_le().await?;
     // Only shared key mode supported
@@ -274,6 +277,7 @@ where
         return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
     }
     let index_type: u8 = v as u8 & 0x0F;
+
     // Read the number of keys
     v = reader.read_u64_le().await?;
 

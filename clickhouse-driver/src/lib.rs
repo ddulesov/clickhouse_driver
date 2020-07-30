@@ -8,7 +8,6 @@
 //!   clickhouse-driver-lz4 = { version="0.1.0", path="../path_to_package/lz4a"}
 //!   clickhouse-driver-cthrs = { version="0.1.0", path="../path_to_package/cityhash-rs"}
 //!   ```
-//!
 //! ## Supported Clickhouse data types
 //! * Date | DateTime | DateTime64- read/write
 //! * (U)Int(8|16|32|64) - read/write
