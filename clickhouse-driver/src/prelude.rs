@@ -1,5 +1,6 @@
 pub use crate::{
     client::Connection,
+    pool::options::{CompressionMethod, Options},
     //client::QueryResult,
     pool::{Pool, PoolBuilder},
     protocol::{

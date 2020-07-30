@@ -1,16 +1,28 @@
+use crate::errors::UrlError;
 use std::convert::TryFrom;
 use std::fmt;
 use std::{borrow::Cow, str::FromStr, time::Duration};
-
 use url::Url;
-
-use crate::errors::UrlError;
-use crate::protocol::CompressionMethod;
 
 type Result<T> = std::result::Result<T, UrlError>;
 
 const DEFAULT_MIN_POOL_SIZE: u16 = 2;
 const DEFAULT_MAX_POOL_SIZE: u16 = 10;
+
+#[derive(Copy, Clone, PartialEq, Debug)]
+/// At the moment Clickhouse_driver supports only LZ4 compression method.
+/// It's used by default in Clickhouse 20.x
+pub enum CompressionMethod {
+    None,
+    LZ4,
+}
+
+impl CompressionMethod {
+    #[inline(always)]
+    pub fn is_none(&self) -> bool {
+        matches!(self, CompressionMethod::None)
+    }
+}
 
 /// Clickhouse connection options.
 #[derive(Clone)]
@@ -226,6 +238,11 @@ impl Options {
         }
 
         Ok(options)
+    }
+
+    pub fn set_compression(mut self, compression: CompressionMethod) -> Self {
+        self.compression = compression;
+        self
     }
 }
 

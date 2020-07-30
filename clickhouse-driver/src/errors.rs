@@ -171,6 +171,12 @@ impl From<ParseError> for UrlError {
         UrlError::Parse(err)
     }
 }
+/// NotAnError
+impl From<std::convert::Infallible> for Error {
+    fn from(_: std::convert::Infallible) -> Self {
+        Error::Other(Cow::Borrowed(""))
+    }
+}
 
 impl From<ParseError> for Error {
     fn from(err: ParseError) -> Self {

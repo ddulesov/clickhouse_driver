@@ -205,7 +205,6 @@ impl fmt::Debug for BlockColumnHeader {
 pub struct BlockColumn {
     pub(crate) header: BlockColumnHeader,
     pub(crate) data: Box<dyn AsInColumn>,
-    //pub(crate) nulls: Option<Vec<u8>>,
 }
 
 impl BlockColumn {

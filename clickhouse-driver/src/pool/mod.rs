@@ -7,6 +7,7 @@ use std::{
 
 pub use builder::PoolBuilder;
 use crossbeam::queue;
+pub use options::CompressionMethod;
 pub use options::Options;
 use tokio::sync;
 use tokio::time::delay_for;
@@ -14,7 +15,7 @@ use util::*;
 
 use crate::{
     client::{disconnect, Connection, InnerConection},
-    errors::{Result, UrlError},
+    errors::{Error, Result},
 };
 
 use self::disconnect::DisconnectPool;
@@ -86,7 +87,8 @@ impl Inner {
     }
 }
 
-/// Asynchronous pool of Clickhouse connections.
+/// Reference to a asynchronous  Clickhouse connections pool.
+/// It can be cloned and shared between threads.
 #[derive(Clone)]
 pub struct Pool {
     pub(crate) inner: Arc<Inner>,
@@ -114,13 +116,15 @@ impl Pool {
     /// let pool = Pool::create("tcp://username:password@localhost/db?compression=lz4");
     /// ```
     #[inline]
-    pub fn create<T>(options: T) -> Result<Pool>
+    pub fn create<T, E>(options: T) -> Result<Pool>
     where
-        T: TryInto<Options, Error = UrlError>,
+        Error: From<E>,
+        T: TryInto<Options, Error = E>,
     {
         let options = options.try_into()?;
         PoolBuilder::create(options)
     }
+
     /// Return pool current status.
     #[inline(always)]
     pub fn info(&self) -> PoolInfo {

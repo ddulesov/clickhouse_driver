@@ -9,10 +9,9 @@ use tokio::sync;
 use crate::{
     client::InnerConection,
     errors::{Result, UrlError},
-    protocol::CompressionMethod,
 };
 
-use super::{Inner, Options, Pool, POOL_STATUS_SERVE};
+use super::{CompressionMethod, Inner, Options, Pool, POOL_STATUS_SERVE};
 
 /// Connection pool builder
 ///
@@ -139,9 +138,6 @@ impl PoolBuilder {
             }
             .into());
         }
-
-        //let min = options.pool_min;
-        //let max = options.pool_max;
 
         #[allow(unused_variables)]
         if cfg!(feature = "recycle") {

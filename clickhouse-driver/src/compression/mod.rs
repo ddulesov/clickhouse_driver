@@ -99,7 +99,7 @@ pub(crate) struct LZ4ReadAdapter<R: AsyncBufRead + ?Sized> {
     inner: R,
 }
 
-impl<R: AsyncBufRead + Unpin> LZ4ReadAdapter<R> {
+impl<R: AsyncBufRead + Unpin + Send> LZ4ReadAdapter<R> {
     pub(crate) fn new(reader: R) -> LZ4ReadAdapter<R> {
         LZ4ReadAdapter {
             hash: [0u8; 16],
@@ -116,6 +116,10 @@ impl<R: AsyncBufRead + Unpin> LZ4ReadAdapter<R> {
         } else {
             panic!("consume incomplete LZ4 Block");
         }
+    }
+
+    pub(crate) fn inner_ref(&mut self) -> &mut R {
+        &mut self.inner
     }
 
     fn fill(&mut self, cx: &mut Context<'_>) -> Poll<Result<&[u8], io::Error>> {
@@ -222,7 +226,7 @@ impl<R: AsyncBufRead + Unpin> LZ4ReadAdapter<R> {
     }
 }
 
-impl<R: AsyncBufRead + Unpin> AsyncRead for LZ4ReadAdapter<R> {
+impl<R: AsyncBufRead + Unpin + Send> AsyncRead for LZ4ReadAdapter<R> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -249,7 +253,7 @@ impl<R: AsyncBufRead + Unpin> AsyncRead for LZ4ReadAdapter<R> {
     }
 }
 
-impl<R: AsyncBufRead + Unpin> AsyncBufRead for LZ4ReadAdapter<R> {
+impl<R: AsyncBufRead + Unpin + Send> AsyncBufRead for LZ4ReadAdapter<R> {
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<&[u8], io::Error>> {
         let me = self.get_mut();
         me.fill(cx)

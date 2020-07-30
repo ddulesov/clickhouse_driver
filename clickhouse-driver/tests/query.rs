@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use clickhouse_driver::prelude::errors;
 use clickhouse_driver::prelude::*;
+use std::convert::TryInto;
 use std::env;
 use std::net::Ipv4Addr;
 use uuid::Uuid;
@@ -11,6 +12,14 @@ pub fn get_pool() -> Pool {
     });
 
     Pool::create(database_url).expect("provide connection url in DATABASE_URL env variable")
+}
+
+pub fn get_config() -> Options {
+    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "tcp://localhost?execute_timeout=5s&query_timeout=20s&pool_max=4&compression=lz4".into()
+    });
+
+    database_url.try_into().unwrap()
 }
 
 macro_rules! get {
@@ -31,6 +40,40 @@ async fn test_query_ddl() -> errors::Result<()> {
     conn.execute("DROP TABLE IF EXISTS rust2").await?;
     conn.execute("CREATE TABLE rust2(x Int64) ENGINE=Memory")
         .await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_query_compress() -> errors::Result<()> {
+    let config = get_config();
+
+    let pool = Pool::create(config.set_compression(CompressionMethod::LZ4)).unwrap();
+    {
+        let mut conn = pool.connection().await?;
+
+        let mut qr = conn.query("SELECT lcs FROM main LIMIT 1000").await?;
+        while let Some(_block) = qr.next().await? {}
+        assert_eq!(qr.is_pending(), false);
+    }
+
+    drop(pool);
+    let config = get_config();
+
+    let pool = Pool::create(config.set_compression(CompressionMethod::None)).unwrap();
+    let mut conn = pool.connection().await?;
+
+    let mut qr = conn.query("SELECT lcs FROM main LIMIT 1000").await?;
+    while let Some(_block) = qr.next().await? {}
+
+    drop(pool);
+    let pool = get_pool();
+    {
+        let mut conn = pool.connection().await?;
+
+        let mut qr = conn.query("SELECT lcs FROM main LIMIT 1000").await?;
+        while let Some(_block) = qr.next().await? {}
+        assert_eq!(qr.is_pending(), false);
+    }
     Ok(())
 }
 

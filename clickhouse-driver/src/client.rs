@@ -10,10 +10,13 @@ use crate::protocol::insert::InsertSink;
 use crate::protocol::packet::Response;
 use crate::protocol::packet::{Command, Execute, Hello, Ping};
 use crate::protocol::query::Query;
-use crate::protocol::{CompressionMethod, ServerWriter};
+use crate::protocol::ServerWriter;
 use crate::{
     errors::{DriverError, Result},
-    pool::{options::Options, Pool},
+    pool::{
+        options::{CompressionMethod, Options},
+        Pool,
+    },
 };
 use chrono_tz::Tz;
 use log::info;
@@ -68,7 +71,7 @@ pub struct QueryResult<'a, R: AsyncRead, W: AsyncWrite> {
     sink: CommandSink<W>,
 }
 
-impl<'a, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> QueryResult<'a, R, W> {
+impl<'a, R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin> QueryResult<'a, R, W> {
     pub async fn next(&mut self) -> Result<Option<ServerBlock>> {
         while let Some(packet) = self.inner.next(self.timeout).await? {
             if let Response::Data(block) = packet {
@@ -215,7 +218,7 @@ pub(crate) trait ServerContext {
     fn info(&self) -> &ServerInfo;
 }
 
-/// Clickhouse client connection
+/// Represent Clickhouse client active connection
 pub struct Connection {
     inner: Box<Inner>,
     pub(crate) pool: Option<Pool>,
@@ -429,7 +432,7 @@ impl Connection {
         info.set_pending();
 
         Ok((
-            ResponseStream::new(rdr, info),
+            ResponseStream::with_capacity(1024, rdr, info),
             CommandSink::new(wrt),
             self.out.as_mut(), //self.out.as_ref(),
         ))
