@@ -156,7 +156,7 @@ async fn test_insert_enum() -> errors::Result<()> {
 
     drop(insert);
     let mut query_result = conn
-        .query("SELECT sum(id), count(*), any(e8), any(e16) FROM test_insert_enum")
+        .query("SELECT sum(id), count(*), any(e8), any(e16) FROM test_insert_enum where e8='Jun'")
         .await?;
     let block = query_result.next().await?.expect("1 row block ");
 
@@ -169,8 +169,8 @@ async fn test_insert_enum() -> errors::Result<()> {
     let e16i: i16 = get!(row, 3, "enum 16");
     let e16: &str = get!(row, 3, "enum 16");
 
-    assert_eq!(s, 1500);
-    assert_eq!(c, 600);
+    assert_eq!(s, 0);
+    assert_eq!(c, 100);
     assert_eq!(e8i, 6);
     assert_eq!(e16i, 6);
     assert_eq!(e8, "Jun");
