@@ -159,10 +159,9 @@ impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
                     let resp = read_block(reader, &self.columns, self.info.timezone).await?;
 
                     if let Some(block) = resp {
-                        //block.stream = Some(self);
                         if self.skip_empty && block.rows == 0 {
                             self.skip_empty = false;
-                            // Store block structure for subsequent read_block calls
+                            // Cache block structure for subsequent read_block calls
                             self.columns = block.into_headers();
                             continue;
                         }
@@ -258,32 +257,29 @@ where
     if field.sql_type != SqlType::String {
         return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
     }
-    // if rows == 0 {
-    //     return Ok(Box::new(LowCardinalityColumn::<u8>::empty()));
-    // }
-
-    // read version number
+    // Read version number
     let mut v: u64 = reader.read_u64_le().await?;
-
+    // Only shared key mode supported
     if v != SHARED_WITH_ADDITIONAL_KEY {
         return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
     }
-    // read serialization type
+    // Read serialization type
     v = reader.read_u64_le().await?;
 
     if v & GLOBAL_DICTIONARY == GLOBAL_DICTIONARY {
         return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
     }
+
     if v & ADDITIONAL_KEY == 0 {
         return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
     }
     let index_type: u8 = v as u8 & 0x0F;
-    // read number of keys
+    // Read the number of keys
     v = reader.read_u64_le().await?;
 
     let keys: FixedColumn<BoxString> =
         FixedColumn::load_string_column(reader.borrow_mut(), v as u64).await?;
-    // read number of values
+    // Read the number of values
     v = reader.read_u64_le().await?;
     if v != rows {
         return err!(DriverError::BrokenData);
@@ -419,7 +415,6 @@ where
     // Read block-info (BI)
     let block_info = read_block_info(reader.borrow_mut()).await?;
     // Shortcut parse time for empty block but return header-only to caller
-    // dbg!( rip() );
     if block_info.is_empty() {
         return Ok(None);
     }
@@ -493,12 +488,7 @@ where
         l = rdr.read_vint().await?;
         let message = rdr.read_string(l).await?;
         l = rdr.read_vint().await?;
-        let trace: String = rdr.read_string(l).await?;
-
-        #[cfg(not(test))]
-        {
-            drop(trace);
-        }
+        let _trace: String = rdr.read_string(l).await?;
 
         let nested = rdr.read_byte().await?;
 
@@ -507,8 +497,11 @@ where
             name,
             message,
             #[cfg(test)]
-            trace,
+            trace: _trace,
         };
+
+        //#[cfg(not(test))]
+        //    drop(trace);
 
         resp.push(one);
         if nested == 0u8 {
@@ -648,7 +641,7 @@ mod test {
 
     impl<'a> AsyncBufRead for AsyncChunk<'a> {
         fn poll_fill_buf(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
-            // Force read by small chunks
+            // Force AsyncBufRead to read by small chunks
             Poll::Ready(Ok(&[]))
         }
 

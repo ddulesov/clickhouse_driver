@@ -156,7 +156,7 @@ async fn test_insert_enum() -> errors::Result<()> {
 
     drop(insert);
     let mut query_result = conn
-        .query("SELECT sum(id), count(*) FROM test_insert_enum")
+        .query("SELECT sum(id), count(*), any(e8), any(e16) FROM test_insert_enum")
         .await?;
     let block = query_result.next().await?.expect("1 row block ");
 
@@ -164,9 +164,18 @@ async fn test_insert_enum() -> errors::Result<()> {
     let row = block.iter_rows().next().expect("first row");
     let s: u64 = get!(row, 0, "sum of id");
     let c: u64 = get!(row, 1, "number of rows");
+    let e8i: i16 = get!(row, 2, "enum 8 ");
+    let e8: &str = get!(row, 2, "enum 8 ");
+    let e16i: i16 = get!(row, 3, "enum 16");
+    let e16: &str = get!(row, 3, "enum 16");
 
     assert_eq!(s, 1500);
     assert_eq!(c, 600);
+    assert_eq!(e8i, 6);
+    assert_eq!(e16i, 6);
+    assert_eq!(e8, "Jun");
+    assert_eq!(e16, "Jun");
+
     Ok(())
 }
 
@@ -379,7 +388,7 @@ async fn test_insert_uuid() -> errors::Result<()> {
 
     drop(insert);
     let mut query_result = conn
-        .query("SELECT sum(id), count(*) FROM test_insert_uuid")
+        .query("SELECT sum(id), count(*), any(toString(u)) FROM test_insert_uuid")
         .await?;
     let block = query_result.next().await?.expect("1 row block ");
 
@@ -387,9 +396,12 @@ async fn test_insert_uuid() -> errors::Result<()> {
     let row = block.iter_rows().next().expect("first row");
     let s: u64 = row.value(0)?.expect("sum of id");
     let c: u64 = row.value(1)?.expect("number of rows");
+    let u: &str = row.value(2)?.expect("uuid value");
 
     assert_eq!(s, 1500);
     assert_eq!(c, 600);
+    assert_eq!(u, uuid.to_string());
+    println!("UUID: {{{}}}={{{}}}", u, uuid);
     Ok(())
 }
 
@@ -435,7 +447,7 @@ async fn test_insert_decimal() -> errors::Result<()> {
 
     drop(insert);
     let mut query_result = conn
-        .query("SELECT sum(id), count(*) FROM test_insert_decimal")
+        .query("SELECT sum(id), count(*), any(d32), any(d64) FROM test_insert_decimal")
         .await?;
     let block = query_result.next().await?.expect("1 row block ");
 
@@ -443,9 +455,16 @@ async fn test_insert_decimal() -> errors::Result<()> {
     let row = block.iter_rows().next().expect("first row");
     let s: u64 = row.value(0)?.expect("sum of id");
     let c: u64 = row.value(1)?.expect("number of rows");
+    let d32: Decimal32 = row.value(2)?.expect("decimal 32");
+    let d64: Decimal64 = row.value(3)?.expect("decimal 64");
 
     assert_eq!(s, 1500);
     assert_eq!(c, 600);
+
+    assert_eq!(d32.scale(), 3);
+    assert_eq!(d32.internal(), 10001);
+    assert_eq!(d64.scale(), 3);
+    assert_eq!(d64.internal(), 10001);
     Ok(())
 }
 
@@ -496,7 +515,7 @@ async fn test_insert_ip() -> errors::Result<()> {
 
     drop(insert);
     let mut query_result = conn
-        .query("SELECT sum(id), count(*) FROM test_insert_ip")
+        .query("SELECT sum(id), count(*), any(ip4) FROM test_insert_ip")
         .await?;
     let block = query_result.next().await?.expect("1 row block ");
 
@@ -504,9 +523,12 @@ async fn test_insert_ip() -> errors::Result<()> {
     let row = block.iter_rows().next().expect("first row");
     let s: u64 = row.value(0)?.expect("sum of id");
     let c: u64 = row.value(1)?.expect("number of rows");
+    let ip: Ipv4Addr = row.value(2)?.expect("IPv4");
 
     assert_eq!(s, 1500);
     assert_eq!(c, 600);
+
+    assert_eq!(ip.is_loopback(), true);
 
     Ok(())
 }

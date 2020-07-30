@@ -218,7 +218,7 @@ pub(crate) trait ServerContext {
     fn info(&self) -> &ServerInfo;
 }
 
-/// Clickhouse client connection
+/// Represent Clickhouse client active connection
 pub struct Connection {
     inner: Box<Inner>,
     pub(crate) pool: Option<Pool>,

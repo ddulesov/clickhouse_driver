@@ -10,7 +10,7 @@ Tested on Linux x86-64 (ubuntu 20.04 LTS), Windows 10.
 
 ### Why ###
 
-* To create small, quick, and robust driver for Clickhouse, fast open-source column oriented database
+* To create small and robust driver for Clickhouse, fast open-source column oriented database
 * To learn rust concurrency and zero-cost abstraction
 
 ### Supported features ###
@@ -45,11 +45,11 @@ Download source from [home git](https://github.com/ddulesov/clickhouse_driver)
 Building requires rust 1.41 stable or nightly,
 tokio-0.2.x.
 
-- Add dependencies to Cargo.toml 
+- Add next lines into the `dependencies` section of your `Cargo.toml`: 
   ```toml   
-  clickhouse-driver = { version="0.1.0-alpha.1", path="../path_to_package"}
-  clickhouse-driver-lz4 = { version="0.1.0", path="../path_to_package"}
-  clickhouse-driver-cthrs = { version="0.1.0", path="../path_to_package"}
+ clickhouse-driver = { version="0.1.0-alpha.1", path="../path_to_package/clickhouse-driver"}
+ clickhouse-driver-lz4 = { version="0.1.0", path="../path_to_package/lz4a"}
+ clickhouse-driver-cthrs = { version="0.1.0", path="../path_to_package/cityhash-rs"}
   ```
 - Add usage in main.rs
   ```rust
@@ -65,7 +65,7 @@ for example
 ```
 tcp://user:default@localhost/log?ping_timout=200ms&execute_timeout=5s&query_timeout=20s&pool_max=4&compression=lz4
 ```
-### parameters
+### Supported URL parameters
 * `compression` - accepts 'lz4' or 'none'.
    lz4 - fast and efficient compression method.
    It can significantly reduce transmitted data size and time if used for
@@ -212,16 +212,18 @@ async fn main() -> Result<(), io::Error> {
    - UUID - Uuid
    - IPv4 - AddrIpv4
    - IPv6 - AddrIpv6
-   - String - &str or String or &[u8]
-   - Enum8|16 - &str or String
+   - String - &str,String, or &[u8]
+   - Enum8|16 - &str or String. Also, i16 value of enum index can be retrieved.
    
 ### Roadmap
 
-* Array column data type - read/write  
-* Tuple - no plans to  support 
-* AggregateFunction - no plans to support
-* LowCardinality - add write support, extend feature to Date, DateTime types   
-* Serde - serializer/deserializer interface    
+* `Array` column data type - read/write  
+* `Tuple` - no plans to  support 
+* `AggregateFunction` - no plans to support
+* `LowCardinality` - add write support, extend the feature to Date, DateTime types   
+* `Serde` - Row serializer/deserializer interface in addition to bespoke one
+* `TLS`
+* `async_std` runtime
    
    
   

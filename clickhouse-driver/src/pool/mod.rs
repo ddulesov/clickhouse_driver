@@ -87,7 +87,8 @@ impl Inner {
     }
 }
 
-/// Asynchronous pool of Clickhouse connections.
+/// Reference to a asynchronous  Clickhouse connections pool.
+/// It can be cloned and shared between threads.
 #[derive(Clone)]
 pub struct Pool {
     pub(crate) inner: Arc<Inner>,

@@ -115,6 +115,16 @@ impl<'a> Value<'a, &'a [u8]> for ValueRef<'a> {
     }
 }
 
+impl<'a> Value<'a, i16> for ValueRef<'a> {
+    #[allow(clippy::unnested_or_patterns)]
+    fn get(&'a self, _: &'a Field) -> Result<Option<i16>> {
+        match self.inner {
+            Some(ValueRefEnum::Int16(v)) | Some(ValueRefEnum::Enum(v)) => Ok(Some(v)),
+            _ => err!(ConversionError::UnsupportedConversion),
+        }
+    }
+}
+
 #[inline]
 fn decimal_scale_from_field(field: &Field) -> u8 {
     match field.sql_type {
@@ -191,7 +201,8 @@ impl_value!(i64, ValueRefEnum::Int64);
 impl_value!(u32, ValueRefEnum::UInt32);
 impl_value!(i32, ValueRefEnum::Int32);
 impl_value!(u16, ValueRefEnum::UInt16);
-impl_value!(i16, ValueRefEnum::Int16);
+//particular case for i16. it can be retrieved from Enum as well
+//impl_value!(i16, ValueRefEnum::Int16);
 impl_value!(u8, ValueRefEnum::UInt8);
 impl_value!(i8, ValueRefEnum::Int8);
 
