@@ -2,19 +2,19 @@ package main
 
 import (
 	"database/sql"
-	"net/url"
 	"fmt"
-	"log"
-	"time"
-	"os"
 	"github.com/ClickHouse/clickhouse-go"
+	"log"
+	"net/url"
+	"os"
+	"time"
 )
 
-func perf_insert(connect *sql.DB){
+func perf_insert(connect *sql.DB) {
 	_, err := connect.Exec(`DROP TABLE IF EXISTS perf_go`)
 	if err != nil {
 		log.Fatal(err)
-	}	
+	}
 
 	_, err = connect.Exec(`
 		CREATE TABLE IF NOT EXISTS perf_go (
@@ -27,27 +27,26 @@ func perf_insert(connect *sql.DB){
 	if err != nil {
 		log.Fatal(err)
 	}
-	
-	NAMES := [5]string{"one","two","three","four","five"}
+
+	NAMES := [5]string{"one", "two", "three", "four", "five"}
 	start := time.Now()
-	
-	for l :=0 ; l<1000 ; l++{
-		tx, _  := connect.Begin()
+
+	for l := 0; l < 1000; l++ {
+		tx, _ := connect.Begin()
 		stmt, err := tx.Prepare("INSERT INTO perf_go (id, name, dt) VALUES (?, ?, ?)")
-			
-			if err != nil {
-				log.Fatal(err)
-			}	
-		
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
 		now := time.Now()
-		
+
 		for i := 0; i < 10000; i++ {
 			if _, err := stmt.Exec(
 				l,
-				
-				NAMES[ i% len(NAMES) ],
-				now.Add( time.Duration(i) * time.Second  ),
-				
+
+				NAMES[i%len(NAMES)],
+				now.Add(time.Duration(i)*time.Second),
 			); err != nil {
 				log.Fatal(err)
 			}
@@ -56,76 +55,76 @@ func perf_insert(connect *sql.DB){
 		if err := tx.Commit(); err != nil {
 			log.Fatal(err)
 		}
-		
+
 		stmt.Close()
 	}
 	elapsed := time.Now().Sub(start)
 	fmt.Printf("elapsed %v msec\n", elapsed.Milliseconds())
 }
 
-func perf_select(connect *sql.DB){
+func perf_select(connect *sql.DB) {
 	start := time.Now()
-	
+
 	rows, err := connect.Query("SELECT id,name,dt FROM perf")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer rows.Close()
-	var sum uint64 = 0;
-	
+	var sum uint64 = 0
+
 	for rows.Next() {
 		var (
 			name string
-			id uint32
-			dt time.Time
+			id   uint32
+			dt   time.Time
 		)
 		if err := rows.Scan(&id, &name, &dt); err != nil {
 			log.Fatal(err)
 		}
-		sum += uint64(id);
+		sum += uint64(id)
 	}
 
 	if err := rows.Err(); err != nil {
 		log.Fatal(err)
 	}
-	
+
 	elapsed := time.Now().Sub(start)
 	fmt.Printf("elapsed %v msec\n", elapsed.Milliseconds())
-	fmt.Printf(" sum=%d",sum);
+	fmt.Printf(" sum=%d", sum)
 }
 
 func main() {
 
 	db_url := os.Getenv("DATABASE_URL")
-	
+
 	if db_url != "" {
-		u, err := url.Parse( db_url )
-		if err!=nil {
+		u, err := url.Parse(db_url)
+		if err != nil {
 			log.Fatal(err)
 		}
 		q := u.Query()
-		if q.Get("compression")!=""{
+		if q.Get("compression") != "" {
 			q.Del("compression")
-			q.Set("compress","true")
+			q.Set("compress", "true")
 		}
-		
-		if v,ok := u.User.Password(); ok {
-			q.Set("password", v )
+
+		if v, ok := u.User.Password(); ok {
+			q.Set("password", v)
 		}
-		
+
 		v := u.User.Username()
-		q.Set("username",v)
-		
+		q.Set("username", v)
+
 		u.RawQuery = q.Encode()
-		
+
 		db_url = u.String()
-	}else{
+	} else {
 		db_url = "tcp://default@localhost/default?compress=true"
 	}
-	
+
 	fmt.Printf("url = %v\n", db_url)
-	
-	connect, err := sql.Open("clickhouse", db_url )
+
+	connect, err := sql.Open("clickhouse", db_url)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -137,16 +136,15 @@ func main() {
 		}
 		return
 	}
-	
+
 	//connection established
 	meth := os.Args[1]
 	if meth == "insert" {
 		perf_insert(connect)
-	}else if meth == "select" {
-		perf_select(connect);
-	}else {
-		fmt.Printf("method not provided");
+	} else if meth == "select" {
+		perf_select(connect)
+	} else {
+		fmt.Printf("method not provided")
 	}
 
-	
 }

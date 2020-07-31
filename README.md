@@ -41,22 +41,26 @@ Tested on Linux x86-64 (ubuntu 20.04 LTS), Windows 10.
 ### Quick start ###
 The package has not published in crates.io.
 Download source from [home git](https://github.com/ddulesov/clickhouse_driver)
+```bash
+git module update --init --recursive
+```
 
 Building requires rust 1.41 stable or nightly,
 tokio-0.2.x.
 
 - Add next lines into the `dependencies` section of your `Cargo.toml`: 
-  ```toml   
- clickhouse-driver = { version="0.1.0-alpha.1", path="../path_to_package/clickhouse-driver"}
+
+```toml   
+ clickhouse-driver = { version="0.1.0-alpha.2", path="../path_to_package/clickhouse-driver"}
  clickhouse-driver-lz4 = { version="0.1.0", path="../path_to_package/lz4a"}
  clickhouse-driver-cthrs = { version="0.1.0", path="../path_to_package/cityhash-rs"}
 
-  ```
+```
 - Add usage in main.rs
-  ```rust
+```rust
   extern crate clickhouse_driver;   
   use clickhouse_driver::prelude::*;
-  ```
+```
   
 to connect to server provide connection url 
 ```
@@ -221,7 +225,7 @@ async fn main() -> Result<(), io::Error> {
 * `Array` column data type - read/write  
 * `Tuple` - no plans to  support 
 * `AggregateFunction` - no plans to support
-* `LowCardinality` - add write support, extend the feature to Date, DateTime types   
+* `LowCardinality` - add write support, extend it to `Date`, `DateTime` types   
 * `Serde` - Row serializer/deserializer interface in addition to bespoke one
 * `TLS`
 * `async_std` runtime
