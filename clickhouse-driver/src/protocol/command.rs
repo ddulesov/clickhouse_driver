@@ -133,7 +133,6 @@ impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
 
             match code[0] as u64 {
                 SERVER_PONG => {
-
                     return Ok(Some(Response::Pong));
                 }
                 SERVER_END_OF_STREAM => {
@@ -158,7 +157,6 @@ impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
                         };
 
                     let resp = read_block(reader, &self.columns, self.info.timezone).await?;
-
 
                     if let Some(block) = resp {
                         if self.skip_empty && block.rows == 0 {

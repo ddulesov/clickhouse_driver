@@ -87,32 +87,94 @@ where
 
 enum CompressionState {
     Hash,
-    Block(Vec<u8>, u32, u32),
-    Raw(Vec<u8>),
+    Compressed,
+    Decompressed,
+}
+
+fn read_head(buf: &[u8]) -> io::Result<(u32, u32)> {
+    let mut cursor = io::Cursor::new(buf);
+    cursor.set_position(16);
+
+    let code = cursor.read_u8().expect("");
+    let comp_size = cursor.read_u32::<LittleEndian>().expect("");
+    let raw_size = cursor.read_u32::<LittleEndian>().expect("");
+
+    if code != LZ4_COMPRESSION_METHOD {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            DriverError::BadCompressedPacketHeader,
+            //"unsupported compression method",
+        ));
+    }
+
+    if comp_size == 0
+        || comp_size as usize > crate::MAX_BLOCK_SIZE_BYTES
+        || raw_size as usize > crate::MAX_BLOCK_SIZE_BYTES
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            errors::DriverError::PacketTooLarge,
+            //"compressed block size exceeds max value",
+        ));
+    };
+
+    Ok((comp_size, raw_size))
+}
+
+fn decompress(buf: &[u8], raw_size: usize) -> io::Result<Vec<u8>> {
+    let calculated_hash = city_hash_128(&buf[16..]);
+
+    if calculated_hash != &buf[0..16] {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            errors::DriverError::BadHash,
+        ));
+    };
+
+    // TODO: decompression in-place
+    let mut orig: Vec<u8> = Vec::with_capacity(raw_size);
+    unsafe {
+        orig.set_len(raw_size);
+        let res = LZ4_Decompress(&buf[16 + 9..], &mut orig[..]);
+        if res < 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                errors::DriverError::BadCompressedPacketHeader,
+            ));
+        }
+        debug_assert_eq!(res as usize, raw_size);
+    }
+    Ok(orig)
 }
 
 pub(crate) struct LZ4ReadAdapter<R: AsyncBufRead + ?Sized> {
     // TODO: optimize out. Use underlying reader buffer to read first  16(hash)+9(head)
-    hash: [u8; 16],
+    data: Vec<u8>,
     state: CompressionState,
-    length: usize,
+    raw_size: usize,
+    p: usize,
     inner: R,
 }
 
 impl<R: AsyncBufRead + Unpin + Send> LZ4ReadAdapter<R> {
     pub(crate) fn new(reader: R) -> LZ4ReadAdapter<R> {
+        let mut data = Vec::with_capacity(16 + 9);
+        unsafe {
+            data.set_len(16 + 9);
+        }
         LZ4ReadAdapter {
-            hash: [0u8; 16],
+            data,
             state: CompressionState::Hash,
-            length: 0,
+            p: 0,
+            raw_size: 0,
             inner: reader,
         }
     }
     /// Consume adapter buffered uncompressed block data
     #[allow(dead_code)]
     fn into_vec(self) -> Vec<u8> {
-        if let CompressionState::Raw(v) = self.state {
-            v
+        if let CompressionState::Decompressed = self.state {
+            self.data
         } else {
             panic!("consume incomplete LZ4 Block");
         }
@@ -122,103 +184,101 @@ impl<R: AsyncBufRead + Unpin + Send> LZ4ReadAdapter<R> {
         &mut self.inner
     }
 
+    fn inner_consume(&mut self, amt: usize) {
+        self.p += amt;
+        if self.p >= self.data.len() {
+            self.p = 0;
+            // Next block
+            self.data.resize(16 + 9, 0);
+            self.state = CompressionState::Hash;
+        }
+    }
+
     fn fill(&mut self, cx: &mut Context<'_>) -> Poll<Result<&[u8], io::Error>> {
         loop {
             match self.state {
-                CompressionState::Raw(ref mut v) => {
-                    return Poll::Ready(Ok(&v[self.length..]));
+                CompressionState::Decompressed => {
+                    return Poll::Ready(Ok(&self.data[self.p..]));
                 }
-                CompressionState::Hash => {
-                    self.length +=
-                        ready!(Pin::new(&mut self.inner)
-                            .poll_read(cx, &mut self.hash[self.length..])?);
-                    if self.length >= self.hash.len() {
-                        debug_assert_eq!(self.length, 16);
+                CompressionState::Compressed => {
+                    // Read from underlying reader. Bypass buffering
+                    let raw_size = self.raw_size;
 
-                        let v = unsafe {
-                            let mut v = Vec::with_capacity(16);
-                            v.set_len(9);
-                            v
-                        };
-                        self.state = CompressionState::Block(v, 0, 0);
-                        self.length = 0;
+                    let n =
+                        ready!(Pin::new(&mut self.inner).poll_read(cx, &mut self.data[self.p..])?);
+                    self.p += n;
+
+                    if self.p >= self.data.len() {
+                        debug_assert_eq!(self.p, self.data.len());
+                        self.data = decompress(self.data.as_slice(), raw_size)?;
+                        self.p = 0;
+                        self.state = CompressionState::Decompressed;
+                        return Poll::Ready(Ok(self.data.as_ref()));
                     }
                 }
-                CompressionState::Block(ref mut buf, ref mut decompressed, ref mut compressed) => {
-                    if *decompressed == 0 {
-                        self.length +=
-                            ready!(Pin::new(&mut self.inner)
-                                .poll_read(cx, &mut buf[self.length..9])?);
-                        //read header
-                        if self.length >= 9 {
-                            debug_assert_eq!(self.length, 9);
+                // Read 16 byte hash and 9 byte header
+                CompressionState::Hash => {
+                    let buf = ready!(Pin::new(&mut self.inner).poll_fill_buf(cx)?);
 
-                            let mut cursor = io::Cursor::new(buf);
-                            let code: u8 = cursor.read_u8().unwrap();
-                            if code != LZ4_COMPRESSION_METHOD {
-                                //println!("compression {:?}", cursor.into_inner());
+                    debug_assert_eq!(self.data.len(), 16 + 9);
 
-                                return Poll::Ready(Err(io::Error::new(
-                                    io::ErrorKind::InvalidData,
-                                    DriverError::BadCompressedPacketHeader,
-                                    //"unsupported compression method",
-                                )));
-                            }
+                    if self.p == 0 && buf.len() >= (16 + 9) {
+                        // We can read header
+                        let (comp_size, raw_size) = read_head(buf)?;
 
-                            *compressed = cursor.read_u32::<LittleEndian>().unwrap();
-                            *decompressed = cursor.read_u32::<LittleEndian>().unwrap();
+                        let raw_size = raw_size as usize;
+                        let comp_size = comp_size as usize;
 
-                            if *compressed > crate::MAX_BLOCK_SIZE_BYTES as u32
-                                || *decompressed > crate::MAX_BLOCK_SIZE_BYTES as u32
-                            {
-                                return Poll::Ready(Err(io::Error::new(
-                                    io::ErrorKind::InvalidData,
-                                    errors::DriverError::PacketTooLarge,
-                                    //"compressed block size exceeds max value",
-                                )));
-                            }
-                            if *decompressed == 0 {
-                                return Poll::Ready(Err(io::Error::new(
-                                    io::ErrorKind::InvalidData,
-                                    errors::DriverError::BadCompressedPacketHeader,
-                                    //"unacceptable compressed block size",
-                                )));
-                            }
-                            let buf = cursor.into_inner();
-                            buf.resize(*compressed as usize, 0);
-                        };
-                    } else {
-                        let read = ready!(Pin::new(&mut self.inner)
-                            .poll_read(cx, &mut buf[self.length..(*compressed as usize)])?);
-                        self.length += read;
-                        if self.length >= *compressed as usize {
-                            let calculated_hash = city_hash_128(&buf[..]);
+                        // Optimize decompression using underlying buffer as input
+                        // We have the hole block in its buffer and can decompress it without copying
+                        if buf.len() >= (comp_size + 16) {
+                            self.data = decompress(&buf[0..comp_size + 16], raw_size)?;
+                            self.p = 0;
+                            self.state = CompressionState::Decompressed;
 
-                            if calculated_hash != self.hash {
-                                self.state = CompressionState::Raw(Vec::new());
-                                return Poll::Ready(Err(io::Error::new(
-                                    io::ErrorKind::InvalidData,
-                                    errors::DriverError::BadHash,
-                                )));
-                            }
-                            self.length = 0;
-                            // TODO: decompression in-place
-                            let mut orig: Vec<u8> = Vec::with_capacity(*decompressed as usize);
+                            Pin::new(&mut self.inner).consume(comp_size + 16);
+                            return Poll::Ready(Ok(self.data.as_slice()));
+                        } else {
+                            self.data.reserve((comp_size - 9) as usize);
                             unsafe {
-                                orig.set_len(*decompressed as usize);
-                                let res = LZ4_Decompress(&buf[9..], &mut orig[..]);
-                                if res < 0 {
-                                    self.state = CompressionState::Raw(Vec::new());
-                                    return Poll::Ready(Err(io::Error::new(
-                                        io::ErrorKind::InvalidData,
-                                        errors::DriverError::BadCompressedPacketHeader,
-                                    )));
-                                }
-                                debug_assert_eq!(res as u32, *decompressed);
+                                self.data.set_len(16 + comp_size as usize);
                             }
+                            debug_assert!(self.data.capacity() >= (comp_size + 16));
+                            debug_assert!(self.data.len() == (comp_size + 16));
 
-                            self.state = CompressionState::Raw(orig);
+                            // Copy available len(buf) bytes from underlying stream and consume it
+                            self.data[0..buf.len()].copy_from_slice(buf);
+                            self.p = buf.len();
+
+                            //let p = self.p;
+                            Pin::new(&mut self.inner).consume(self.p);
+                            self.raw_size = raw_size;
+                            // Read the rest bytes
+                            self.state = CompressionState::Compressed;
+                            continue;
                         }
+                    } else {
+                        // Read the rest of header
+                        let n = std::cmp::min(16 + 9 - self.p, buf.len());
+                        // Copy n bytes from underlying stream and consume it
+                        self.data[self.p..self.p + n].copy_from_slice(&buf[0..n]);
+                        Pin::new(&mut self.inner).consume(n);
+                        self.p += n;
+                    }
+                    // I hope, it must be rare case.
+                    if self.p >= (16 + 9) {
+                        debug_assert_eq!(self.p, 16 + 9);
+
+                        let (comp_size, raw_size) = read_head(self.data.as_slice())?;
+                        self.raw_size = raw_size as usize;
+                        let comp_size = comp_size as usize;
+
+                        self.data.reserve((comp_size - 9) as usize);
+                        unsafe {
+                            self.data.set_len(16 + comp_size as usize);
+                        }
+                        //self.p = 9 + 16;
+                        self.state = CompressionState::Compressed;
                     }
                 }
             };
@@ -234,21 +294,17 @@ impl<R: AsyncBufRead + Unpin + Send> AsyncRead for LZ4ReadAdapter<R> {
     ) -> Poll<Result<usize, io::Error>> {
         let me = self.get_mut();
 
-        let inner = ready!(me.fill(cx)?);
-        let ready_to_read = inner.len();
+        let data = ready!(me.fill(cx)?);
+        let ready_to_read = data.len();
         let toread = std::cmp::min(buf.len(), ready_to_read);
         //let cz = io::copy(inner, buf)?;
+
         if toread == 0 {
             return Poll::Ready(Ok(0));
         };
-        buf[0..toread].copy_from_slice(&inner[0..toread]);
-        me.length += toread;
-        // read next block
-        if toread == ready_to_read {
-            me.state = CompressionState::Hash;
-            me.length = 0;
-        }
+        buf[0..toread].copy_from_slice(&data[0..toread]);
 
+        me.inner_consume(toread);
         Poll::Ready(Ok(toread))
     }
 }
@@ -261,6 +317,6 @@ impl<R: AsyncBufRead + Unpin + Send> AsyncBufRead for LZ4ReadAdapter<R> {
 
     fn consume(self: Pin<&mut Self>, amt: usize) {
         let me = self.get_mut();
-        me.length += amt;
+        me.inner_consume(amt);
     }
 }
