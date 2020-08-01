@@ -3,34 +3,34 @@ use core::marker::PhantomData;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt};
 
-pub(crate) struct ReadBool<'a, R: ?Sized> {
-    inner: &'a mut R,
-}
-
-impl<'a, R: AsyncRead> ReadBool<'a, R> {
-    fn poll_get(&mut self, cx: &mut Context<'_>) -> Poll<Result<u8>> {
-        let mut b = [0u8; 1];
-        {
-            let inner = unsafe { Pin::new_unchecked(&mut *self.inner) };
-
-            if 0 == ready!(inner.poll_read(cx, &mut b)?) {
-                return Poll::Ready(Err(DriverError::BrokenData.into()));
-            };
-        }
-        Ok(b[0]).into()
-    }
-}
-
-impl<'a, R: AsyncRead> Future for ReadBool<'a, R> {
-    type Output = Result<u8>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let me = &mut *self;
-        me.poll_get(cx)
-    }
-}
+// pub(crate) struct ReadBool<'a, R: ?Sized> {
+//     inner: &'a mut R,
+// }
+//
+// impl<'a, R: AsyncRead> ReadBool<'a, R> {
+//     fn poll_get(&mut self, cx: &mut Context<'_>) -> Poll<Result<u8>> {
+//         let mut b = [0u8; 1];
+//         {
+//             let inner = unsafe { Pin::new_unchecked(&mut *self.inner) };
+//
+//             if 0 == ready!(inner.poll_read(cx, &mut b)?) {
+//                 return Poll::Ready(Err(DriverError::BrokenData.into()));
+//             };
+//         }
+//         Ok(b[0]).into()
+//     }
+// }
+//
+// impl<'a, R: AsyncRead> Future for ReadBool<'a, R> {
+//     type Output = Result<u8>;
+//
+//     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+//         let me = &mut *self;
+//         me.poll_get(cx)
+//     }
+// }
 
 pub(crate) struct ReadVString<'a, T: FromBytes, R> {
     length_: usize,
@@ -40,19 +40,21 @@ pub(crate) struct ReadVString<'a, T: FromBytes, R> {
 }
 
 pub trait FromBytes: Sized {
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self>;
+    fn from_bytes(bytes: &mut Vec<u8>) -> Result<Self>;
 }
 
 impl FromBytes for String {
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
-        String::from_utf8(bytes).map_err(|_e| ConversionError::Utf8.into())
+    #[inline]
+    fn from_bytes(bytes: &mut Vec<u8>) -> Result<Self> {
+        let b = std::mem::take(bytes);
+        String::from_utf8(b).map_err(|_e| ConversionError::Utf8.into())
     }
 }
 
 impl FromBytes for Vec<u8> {
     #[inline]
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
-        Ok(bytes)
+    fn from_bytes(bytes: &mut Vec<u8>) -> Result<Self> {
+        Ok(std::mem::take(bytes))
     }
 }
 
@@ -75,15 +77,16 @@ impl<'a, T: FromBytes, R: AsyncRead> ReadVString<'a, T, R> {
     fn poll_get(&mut self, cx: &mut Context<'_>) -> Poll<Result<T>> {
         loop {
             if self.length_ == self.data.len() {
-                let s = std::mem::replace(&mut self.data, Vec::new());
-                let s: Result<T> = FromBytes::from_bytes(s);
+                // In any case reset length
                 self.length_ = 0;
-                return s.into();
-            };
-            self.length_ += ready!(self
-                .inner
-                .as_mut()
-                .poll_read(cx, &mut self.data[self.length_..])?);
+                //let s = std::mem::replace(&mut self.data, Vec::new());
+                return FromBytes::from_bytes(&mut self.data).into();
+            } else {
+                self.length_ += ready!(self
+                    .inner
+                    .as_mut()
+                    .poll_read(cx, &mut self.data[self.length_..])?);
+            }
         }
     }
 }
@@ -168,15 +171,38 @@ impl<R: AsyncRead> ValueReader<R> {
     }
 }
 
-impl<R: AsyncRead + Unpin> ValueReader<R> {
-    pub(super) async fn skip(&mut self, len: u64) -> Result<()> {
-        let mut buf = [0u8; 64];
-        let mut about_to_read = len as usize;
-        while about_to_read > 0 {
-            let l = std::cmp::min(about_to_read, 64);
-            about_to_read -= self.inner.read(&mut buf[0..l]).await?;
+pub(crate) struct Skip<'a, R> {
+    value: usize,
+    inner: Pin<&'a mut R>,
+}
+
+impl<'a, R: AsyncBufRead> Skip<'a, R> {
+    pub(super) fn poll_skip(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
+        while self.value > 0 {
+            let buf = ready!(self.inner.as_mut().poll_fill_buf(cx)?);
+            let n = std::cmp::min(self.value, buf.len());
+            self.inner.as_mut().consume(n);
+            self.value -= n;
         }
-        Ok(())
+        Ok(()).into()
+    }
+}
+
+impl<'a, R: AsyncBufRead> Future for Skip<'a, R> {
+    type Output = Result<()>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let me = &mut *self;
+        me.poll_skip(cx)
+    }
+}
+
+impl<R: AsyncBufRead + Unpin> ValueReader<R> {
+    pub(super) fn skip(&mut self, len: u64) -> Skip<'_, R> {
+        Skip {
+            value: len as usize,
+            inner: Pin::new(&mut self.inner),
+        }
     }
 
     pub(super) async fn read_byte(&mut self) -> Result<u8> {

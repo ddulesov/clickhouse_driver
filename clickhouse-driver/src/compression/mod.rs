@@ -16,6 +16,7 @@ pub use clickhouse_driver_lz4::{
 
 use crate::errors;
 use crate::errors::DriverError;
+use crate::prelude::CompressionMethod;
 
 pub(crate) struct LZ4CompressionWrapper<W: ?Sized> {
     buf: Vec<u8>,
@@ -50,7 +51,7 @@ where
         }
         let original_size = self.buf.len() as u32;
 
-        drop(std::mem::replace(&mut self.buf, Vec::new()));
+        drop(std::mem::take(&mut self.buf));
 
         compressed.resize(bufsize as usize + 9, 0);
 
@@ -86,9 +87,21 @@ where
 }
 
 enum CompressionState {
+    /// Read first 16 byte containing hash sum of the block +9 bytes of header
     Hash,
+    /// Read raw data from underlying reader
     Compressed,
+    /// Supply decompressed data to caller
     Decompressed,
+    /// Bypass LZ4 compression. Read right from underlying reader
+    ByPass,
+}
+
+impl CompressionState {
+    #[inline]
+    fn is_bypass(&self) -> bool {
+        matches!(self, CompressionState::ByPass)
+    }
 }
 
 fn read_head(buf: &[u8]) -> io::Result<(u32, u32)> {
@@ -103,7 +116,6 @@ fn read_head(buf: &[u8]) -> io::Result<(u32, u32)> {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             DriverError::BadCompressedPacketHeader,
-            //"unsupported compression method",
         ));
     }
 
@@ -114,7 +126,6 @@ fn read_head(buf: &[u8]) -> io::Result<(u32, u32)> {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             errors::DriverError::PacketTooLarge,
-            //"compressed block size exceeds max value",
         ));
     };
 
@@ -148,10 +159,13 @@ fn decompress(buf: &[u8], raw_size: usize) -> io::Result<Vec<u8>> {
 }
 
 pub(crate) struct LZ4ReadAdapter<R: AsyncBufRead + ?Sized> {
-    // TODO: optimize out. Use underlying reader buffer to read first  16(hash)+9(head)
+    /// Internal buffer. It's used alternately for
+    /// reading from underlying reader and for storing decompressed data
     data: Vec<u8>,
     state: CompressionState,
+    /// Size of raw(decompressed) data
     raw_size: usize,
+    /// Number of read or written from(to) `data` bytes
     p: usize,
     inner: R,
 }
@@ -170,6 +184,19 @@ impl<R: AsyncBufRead + Unpin + Send> LZ4ReadAdapter<R> {
             inner: reader,
         }
     }
+    pub(crate) fn new_with_param(reader: R, compression: CompressionMethod) -> LZ4ReadAdapter<R> {
+        if compression == CompressionMethod::LZ4 {
+            LZ4ReadAdapter::new(reader)
+        } else {
+            LZ4ReadAdapter {
+                data: Vec::new(),
+                state: CompressionState::ByPass,
+                p: 0,
+                raw_size: 0,
+                inner: reader,
+            }
+        }
+    }
     /// Consume adapter buffered uncompressed block data
     #[allow(dead_code)]
     fn into_vec(self) -> Vec<u8> {
@@ -179,35 +206,37 @@ impl<R: AsyncBufRead + Unpin + Send> LZ4ReadAdapter<R> {
             panic!("consume incomplete LZ4 Block");
         }
     }
-
+    /// Get TCP socket reader
     pub(crate) fn inner_ref(&mut self) -> &mut R {
         &mut self.inner
     }
 
     fn inner_consume(&mut self, amt: usize) {
         self.p += amt;
+        // Have reached to the end of the block. Go to the next one
         if self.p >= self.data.len() {
             self.p = 0;
-            // Next block
             self.data.resize(16 + 9, 0);
             self.state = CompressionState::Hash;
         }
     }
-
+    /// Read LZ4 compressed block from underlying stream,
+    /// make decompression and return slice of raw unread data.
     fn fill(&mut self, cx: &mut Context<'_>) -> Poll<Result<&[u8], io::Error>> {
         loop {
             match self.state {
+                // Read decompressed buffer data
                 CompressionState::Decompressed => {
                     return Poll::Ready(Ok(&self.data[self.p..]));
                 }
+                // Read rest of compressed data into own buffer
                 CompressionState::Compressed => {
-                    // Read from underlying reader. Bypass buffering
                     let raw_size = self.raw_size;
-
+                    // Read from underlying reader. Bypass buffering
                     let n =
                         ready!(Pin::new(&mut self.inner).poll_read(cx, &mut self.data[self.p..])?);
                     self.p += n;
-
+                    // Got to the end. Decompress and return raw buffer
                     if self.p >= self.data.len() {
                         debug_assert_eq!(self.p, self.data.len());
                         self.data = decompress(self.data.as_slice(), raw_size)?;
@@ -216,21 +245,21 @@ impl<R: AsyncBufRead + Unpin + Send> LZ4ReadAdapter<R> {
                         return Poll::Ready(Ok(self.data.as_ref()));
                     }
                 }
-                // Read 16 byte hash and 9 byte header
+                // Read 16 byte hash + 9 byte header
                 CompressionState::Hash => {
                     let buf = ready!(Pin::new(&mut self.inner).poll_fill_buf(cx)?);
 
                     debug_assert_eq!(self.data.len(), 16 + 9);
 
                     if self.p == 0 && buf.len() >= (16 + 9) {
-                        // We can read header
+                        // Buffered data is long enough, and  we can read header
                         let (comp_size, raw_size) = read_head(buf)?;
 
                         let raw_size = raw_size as usize;
                         let comp_size = comp_size as usize;
 
                         // Optimize decompression using underlying buffer as input
-                        // We have the hole block in its buffer and can decompress it without copying
+                        // We have a LZ4 block in whole in its buffer and can decompress it without copying
                         if buf.len() >= (comp_size + 16) {
                             self.data = decompress(&buf[0..comp_size + 16], raw_size)?;
                             self.p = 0;
@@ -239,6 +268,7 @@ impl<R: AsyncBufRead + Unpin + Send> LZ4ReadAdapter<R> {
                             Pin::new(&mut self.inner).consume(comp_size + 16);
                             return Poll::Ready(Ok(self.data.as_slice()));
                         } else {
+                            // Read block by chunks. First read buffered data
                             self.data.reserve((comp_size - 9) as usize);
                             unsafe {
                                 self.data.set_len(16 + comp_size as usize);
@@ -250,7 +280,6 @@ impl<R: AsyncBufRead + Unpin + Send> LZ4ReadAdapter<R> {
                             self.data[0..buf.len()].copy_from_slice(buf);
                             self.p = buf.len();
 
-                            //let p = self.p;
                             Pin::new(&mut self.inner).consume(self.p);
                             self.raw_size = raw_size;
                             // Read the rest bytes
@@ -258,14 +287,14 @@ impl<R: AsyncBufRead + Unpin + Send> LZ4ReadAdapter<R> {
                             continue;
                         }
                     } else {
-                        // Read the rest of header
+                        // We have less then 25 buffered bytes. Read it and then the rest of the header
                         let n = std::cmp::min(16 + 9 - self.p, buf.len());
-                        // Copy n bytes from underlying stream and consume it
+                        // Copy n available bytes from underlying stream and consume it
                         self.data[self.p..self.p + n].copy_from_slice(&buf[0..n]);
                         Pin::new(&mut self.inner).consume(n);
                         self.p += n;
                     }
-                    // I hope, it must be rare case.
+                    // I hope, it must be rare case when to read header require more than 1 call.
                     if self.p >= (16 + 9) {
                         debug_assert_eq!(self.p, 16 + 9);
 
@@ -278,9 +307,12 @@ impl<R: AsyncBufRead + Unpin + Send> LZ4ReadAdapter<R> {
                             self.data.set_len(16 + comp_size as usize);
                         }
                         //self.p = 9 + 16;
+                        // Read the rest of LZ4 block without double buffering right from TCP socket
                         self.state = CompressionState::Compressed;
                     }
                 }
+                // This state does not imply decompression circle
+                CompressionState::ByPass => unreachable!(),
             };
         }
     }
@@ -293,6 +325,14 @@ impl<R: AsyncBufRead + Unpin + Send> AsyncRead for LZ4ReadAdapter<R> {
         buf: &mut [u8],
     ) -> Poll<Result<usize, io::Error>> {
         let me = self.get_mut();
+
+        // println!("req read {} bytes from {}",
+        //          buf.len(),
+        //          if me.state.is_bypass() {"none"} else { "lz4"}
+        // );
+        if me.state.is_bypass() {
+            return Pin::new(&mut me.inner).poll_read(cx, buf);
+        }
 
         let data = ready!(me.fill(cx)?);
         let ready_to_read = data.len();
@@ -312,11 +352,18 @@ impl<R: AsyncBufRead + Unpin + Send> AsyncRead for LZ4ReadAdapter<R> {
 impl<R: AsyncBufRead + Unpin + Send> AsyncBufRead for LZ4ReadAdapter<R> {
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<&[u8], io::Error>> {
         let me = self.get_mut();
+        if me.state.is_bypass() {
+            return Pin::new(&mut me.inner).poll_fill_buf(cx);
+        }
         me.fill(cx)
     }
 
     fn consume(self: Pin<&mut Self>, amt: usize) {
         let me = self.get_mut();
-        me.inner_consume(amt);
+        if me.state.is_bypass() {
+            Pin::new(&mut me.inner).consume(amt);
+        } else {
+            me.inner_consume(amt)
+        }
     }
 }
