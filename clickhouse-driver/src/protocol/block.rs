@@ -161,8 +161,8 @@ impl<'b> Block<'b> {
         self
     }
     /// Add new column to block.
-    /// As opposed to add method here we add column for Nullable data types.
-    /// Option None value is used to describe null data.
+    /// In contrast to `add` method, here we add column for Nullable data types.
+    /// Option None value is used  as null data.
     pub fn add_nullable<T: 'b>(mut self, name: &'b str, data: Vec<Option<T>>) -> Self
     where
         Option<T>: IntoColumn<'b>,

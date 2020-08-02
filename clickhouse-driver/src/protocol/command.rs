@@ -2,7 +2,6 @@ use chrono_tz::Tz;
 use futures::Future;
 use std::borrow::BorrowMut;
 use std::marker::Unpin;
-use std::pin::Pin;
 use std::time::Duration;
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::time;
@@ -16,7 +15,6 @@ use super::value::{ValueDate, ValueDateTime, ValueDateTime64, ValueIp4, ValueIp6
 use super::ServerInfo;
 use crate::compression::LZ4ReadAdapter;
 use crate::errors::{self, DriverError, Exception, Result, ServerError};
-use crate::pool::CompressionMethod;
 use crate::protocol::column::{BoxString, LowCardinalityColumn};
 use crate::protocol::decoder::ValueReader;
 #[cfg(feature = "int128")]
@@ -85,11 +83,15 @@ impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
         tcpstream: R,
         info: &'a mut ServerInfo,
     ) -> ResponseStream<'a, R> {
+        let compression = info.compression;
         ResponseStream {
             fuse: false,
             skip_empty: true,
             info,
-            reader: LZ4ReadAdapter::new(BufReader::with_capacity(capacity, tcpstream)),
+            reader: LZ4ReadAdapter::new_with_param(
+                BufReader::with_capacity(capacity, tcpstream),
+                compression,
+            ),
             columns: Vec::new(),
         }
     }
@@ -133,7 +135,6 @@ impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
 
             match code[0] as u64 {
                 SERVER_PONG => {
-
                     return Ok(Some(Response::Pong));
                 }
                 SERVER_END_OF_STREAM => {
@@ -147,18 +148,20 @@ impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
                     // Skip temporary table name
                     let mut rdr = ValueReader::new(self.reader.inner_ref());
                     let l = rdr.read_vint().await?;
+                    // TODO: make skip method more robust than plain consume but
+                    // more effective than rdr.skip
+                    //Pin::new(self.reader.inner_ref()).consume(l as usize);
+                    rdr.skip(l).await?;
+                    // #NOTE. Replacement dynamic dispatch with static here makes sense
+                    // let reader: &mut (dyn AsyncBufRead + Unpin + Send) =
+                    //     if self.info.compression == CompressionMethod::LZ4 {
+                    //         &mut self.reader as &mut (dyn AsyncBufRead + Unpin + Send)
+                    //     } else {
+                    //         self.reader.inner_ref() as &mut (dyn AsyncBufRead + Unpin + Send)
+                    //     };
 
-                    Pin::new(self.reader.inner_ref()).consume(l as usize);
-
-                    let reader: &mut (dyn AsyncBufRead + Unpin + Send) =
-                        if self.info.compression == CompressionMethod::LZ4 {
-                            &mut self.reader as &mut (dyn AsyncBufRead + Unpin + Send)
-                        } else {
-                            self.reader.inner_ref() as &mut (dyn AsyncBufRead + Unpin + Send)
-                        };
-
-                    let resp = read_block(reader, &self.columns, self.info.timezone).await?;
-
+                    let resp =
+                        read_block(&mut self.reader, &self.columns, self.info.timezone).await?;
 
                     if let Some(block) = resp {
                         if self.skip_empty && block.rows == 0 {

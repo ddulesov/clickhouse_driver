@@ -14,9 +14,9 @@ pub struct Pair(pub u64, pub u64);
 
 /// Compare Hash with first 16 byte of Clickhouse Packet Header
 /// @note it's work only with little endian system only
-impl PartialEq<[u8; 16]> for Pair {
-    fn eq(&self, other: &[u8; 16]) -> bool {
-        (self.0 == fetch64(other)) && (self.1 == fetch64(&other[8..]))
+impl PartialEq<&[u8]> for Pair {
+    fn eq(&self, other: &&[u8]) -> bool {
+        other.len() == 16 && (self.0 == fetch64(*other)) && (self.1 == fetch64(&other[8..]))
     }
 }
 

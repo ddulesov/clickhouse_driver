@@ -63,7 +63,13 @@ async fn test_query_compress() -> errors::Result<()> {
     let mut conn = pool.connection().await?;
 
     let mut qr = conn.query("SELECT lcs FROM main LIMIT 1000").await?;
-    while let Some(_block) = qr.next().await? {}
+    while let Some(block) = qr.next().await? {
+        for row in block.iter_rows() {
+            let _lcs: &str = row.value(0)?.unwrap();
+            //println!("{}",lcs);
+        }
+    }
+    assert_eq!(qr.is_pending(), false);
 
     drop(pool);
     let pool = get_pool();
@@ -71,7 +77,12 @@ async fn test_query_compress() -> errors::Result<()> {
         let mut conn = pool.connection().await?;
 
         let mut qr = conn.query("SELECT lcs FROM main LIMIT 1000").await?;
-        while let Some(_block) = qr.next().await? {}
+        while let Some(block) = qr.next().await? {
+            for row in block.iter_rows() {
+                let _lcs: &str = row.value(0)?.unwrap();
+                //println!("{}", lcs);
+            }
+        }
         assert_eq!(qr.is_pending(), false);
     }
     Ok(())

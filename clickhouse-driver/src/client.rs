@@ -432,7 +432,7 @@ impl Connection {
         info.set_pending();
 
         Ok((
-            ResponseStream::with_capacity(1024, rdr, info),
+            ResponseStream::with_capacity(8 * 1024, rdr, info),
             CommandSink::new(wrt),
             self.out.as_mut(), //self.out.as_ref(),
         ))
