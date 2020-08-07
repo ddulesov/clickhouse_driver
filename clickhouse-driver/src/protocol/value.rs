@@ -562,25 +562,24 @@ pub struct ValueDecimal128(pub i128);
 
 impl ValueDate {
     pub(super) fn to_date(&self) -> chrono::Date<chrono::offset::Utc> {
-        let ce: i32 = 719163_i32 + i16::from_le_bytes(self.0) as i32;
+        ValueDate::date_inner(i16::from_le_bytes(self.0))
+    }
+
+    pub(super) fn date_inner(dates: i16) -> chrono::Date<chrono::offset::Utc> {
+        let ce: i32 = 719163_i32 + dates as i32;
         let nt = NaiveDate::from_num_days_from_ce(ce);
         chrono::Date::from_utc(nt, Utc)
-    }
-    #[allow(dead_code)]
-    pub fn from_days(day: i16) -> ValueDate {
-        ValueDate(day.to_le_bytes())
     }
 }
 
 impl ValueDateTime {
     pub(super) fn to_datetime(&self) -> DateTime<chrono::offset::Utc> {
-        let sec = i32::from_le_bytes(self.0) as i64;
-        let nt = NaiveDateTime::from_timestamp(sec, 0);
-        DateTime::from_utc(nt, Utc)
+        ValueDateTime::datetime_inner(i32::from_le_bytes(self.0))
     }
 
-    pub fn from_timestamp(timestamp: i32) -> ValueDateTime {
-        ValueDateTime(timestamp.to_le_bytes())
+    pub(super) fn datetime_inner(sec: i32) -> DateTime<chrono::offset::Utc> {
+        let nt = NaiveDateTime::from_timestamp(sec as i64, 0);
+        DateTime::from_utc(nt, Utc)
     }
 }
 

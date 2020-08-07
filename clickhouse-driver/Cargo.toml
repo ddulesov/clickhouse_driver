@@ -1,7 +1,7 @@
 [package]
 name = "clickhouse-driver"
 description = "Asynchronous tokio-based Yandex ClickHouse driver."
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 license = "MIT"
 authors = ["dmitry dulesov <dmitry.dulesov@gmail.com>"]
 homepage = "https://github.com/ddulesov/clickhouse_driver"
@@ -10,6 +10,7 @@ edition = "2018"
 keywords = ["tokio", "database", "clickhouse"]
 categories = ["database"]
 exclude = ["tests/*", "examples/*"]
+repository = "https://github.com/ddulesov/clickhouse_driver"
 
 [dependencies]
 clickhouse-driver-cth = { version="0.1.0", path="../cityhash", optional=true}
@@ -28,6 +29,8 @@ hostname = { version="^0.3" }
 chrono = { version="^0.4" }
 chrono-tz = { version="^0.5" }
 crossbeam = { version="^0.7" }
+slab = { version="0.4.2" }
+parking_lot = {version="^0.11"}
 uuid = { version="^0.8", features=["v4"] }
 lazy_static = { version="^1.4" }
 rand= { version="0.7" }
@@ -41,6 +44,7 @@ cityhash_rs = ["clickhouse-driver-cthrs"]
 cityhash = ["clickhouse-driver-cth"]
 recycle = []
 int128 = []
+extra = []
 
 [[example]]
 name = "insert-select"
@@ -52,6 +56,10 @@ required-features = ["cityhash_rs"]
 
 [[example]]
 name = "select"
+required-features = ["cityhash_rs"]
+
+[[example]]
+name = "array"
 required-features = ["cityhash_rs"]
 
 [[test]]

@@ -12,7 +12,7 @@ url = os.environ.get('DATABASE_URL',"tcp://default@localhost/default?compression
 
 url = urlparse(url)._replace(scheme='clickhouse').geturl()
 
-client = Client.from_url(url);
+client = Client.from_url(url)
 
 
 ddl = ("CREATE TABLE IF NOT EXISTS perf_py ("
@@ -41,31 +41,30 @@ def next_block(i):
 
 
 def select_perf():
-	start_time = time.time_ns()
-	res = client.execute("SELECT * FROM perf")
-	
-	print("elapsed %s msec" % ( (time.time_ns() - start_time)/1000000 ))
-	print( len(res) )
-	
+    start_time = time.time_ns()
+    settings = {'max_block_size': 100000}
+    rows = client.execute_iter("SELECT * FROM perf",settings=settings)
+
+    for row in rows:
+        pass
+
+    print("elapsed %s msec" % ( (time.time_ns() - start_time)/1000000 ))
+
+
 def insert_perf():
-    
-	start_time = time.time_ns()
 
-	for i in range(0,CIRCLE):
-		client.execute('INSERT INTO perf_py (id, name, dt) VALUES', next_block(i) )
+    start_time = time.time_ns()
 
-	print("elapsed %s msec" % ( (time.time_ns() - start_time)/1000000 ))        
+    for i in range(0,CIRCLE):
+        client.execute('INSERT INTO perf_py (id, name, dt) VALUES', next_block(i) )
+
+    print("elapsed %s msec" % ( (time.time_ns() - start_time)/1000000 ))
                
 if __name__ == "__main__":
-	if len( sys.argv )<2:
-		print("specify perf test. 'insert' or 'select'. bench.py <name>.")
-		sys.exit(1)
-		
-	perf_name = sys.argv[1] 
-	
-	f = globals()[ perf_name + "_perf" ]
-	f()
-	
-	
-	
-	
+    if len( sys.argv )<2:
+        print("specify perf test. 'insert' or 'select'. bench.py <name>.")
+        sys.exit(1)
+    perf_name = sys.argv[1]
+
+    f = globals()[ perf_name + "_perf" ]
+    f()

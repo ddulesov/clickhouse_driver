@@ -1,5 +1,5 @@
 use chrono_tz::Tz;
-use futures::Future;
+use futures::{Future, TryFutureExt};
 use std::borrow::BorrowMut;
 use std::marker::Unpin;
 use std::time::Duration;
@@ -9,13 +9,12 @@ use tokio::time;
 use super::block::{BlockColumn, BlockColumnHeader, BlockInfo, ServerBlock};
 use super::code::*;
 use super::column::{AsInColumn, EnumColumn, FixedColumn, StringColumn};
-use super::encoder::Encoder;
 use super::packet::{ProfileInfo, Response};
 use super::value::{ValueDate, ValueDateTime, ValueDateTime64, ValueIp4, ValueIp6, ValueUuid};
 use super::ServerInfo;
 use crate::compression::LZ4ReadAdapter;
-use crate::errors::{self, DriverError, Exception, Result, ServerError};
-use crate::protocol::column::{BoxString, LowCardinalityColumn};
+use crate::errors::{DriverError, Exception, Result, ServerError};
+use crate::protocol::column::{BoxString, FixedArrayColumn, LowCardinalityColumn};
 use crate::protocol::decoder::ValueReader;
 #[cfg(feature = "int128")]
 use crate::types::ValueDecimal128;
@@ -33,18 +32,17 @@ const ADDITIONAL_KEY: u64 = 0x0200;
 //const UPDATE_KEY: u64 = 0x0400;
 
 /// Wait future result with timeout
-pub(crate) async fn with_timeout<F, T, E>(fut: F, timeout: Duration) -> Result<T>
+fn with_timeout<F, T>(fut: F, timeout: Duration) -> impl Future<Output = Result<T>>
 where
-    F: Future<Output = std::result::Result<T, E>>,
-    E: Into<errors::Error>,
+    F: Future<Output = Result<T>>,
 {
-    match time::timeout(timeout, fut).await {
-        Ok(Ok(res)) => Ok(res),
-        Ok(Err(e)) => err!(e),
-        Err(_) => err!(crate::errors::DriverError::ConnectionTimeout),
-    }
+    time::timeout(timeout, fut).map_ok_or_else(
+        |_| Err(crate::errors::DriverError::ConnectionTimeout.into()),
+        |ok| ok,
+    )
 }
 
+// TODO: get rid of this
 pub(crate) struct CommandSink<W> {
     pub(crate) writer: W,
 }
@@ -56,21 +54,32 @@ impl<W> CommandSink<W> {
 }
 
 impl<W: AsyncWrite + Unpin> CommandSink<W> {
-    pub(crate) async fn cancel(&mut self) -> Result<()> {
-        let mut buf = Vec::with_capacity(1);
-        CLIENT_CANCEL.encode(&mut buf)?;
-
-        self.writer.write(buf.as_ref()).await?;
-        Ok(())
+    pub(crate) fn cancel(&mut self) -> impl Future<Output = Result<()>> + '_ {
+        self.writer
+            .write_u8(CLIENT_CANCEL as u8)
+            .map_err(Into::into)
     }
 }
 
 pub(crate) struct ResponseStream<'a, R: AsyncRead> {
     fuse: bool,
+    timeout: Duration,
     pub(crate) skip_empty: bool,
     info: &'a mut ServerInfo,
     reader: LZ4ReadAdapter<BufReader<R>>,
     columns: Vec<BlockColumnHeader>,
+}
+
+impl<'a, R: AsyncRead + AsyncWrite + Unpin + Send> ResponseStream<'a, R> {
+    pub(crate) async fn write(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        self.reader.inner_ref().get_mut().write_all(buf).await
+    }
+
+    pub(crate) async fn cancel(&mut self) -> Result<()> {
+        CommandSink::new(self.reader.inner_ref().get_mut())
+            .cancel()
+            .await
+    }
 }
 
 impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
@@ -82,6 +91,7 @@ impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
         capacity: usize,
         tcpstream: R,
         info: &'a mut ServerInfo,
+        timeout: Duration,
     ) -> ResponseStream<'a, R> {
         let compression = info.compression;
         ResponseStream {
@@ -92,6 +102,7 @@ impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
                 BufReader::with_capacity(capacity, tcpstream),
                 compression,
             ),
+            timeout,
             columns: Vec::new(),
         }
     }
@@ -102,15 +113,14 @@ impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
         self.info.clear_pending();
     }
 
-    #[inline]
-    pub(crate) fn set_pending(&mut self) {
-        self.info.set_pending();
-    }
+    // #[inline]
+    // pub(crate) fn set_pending(&mut self) {
+    //     self.info.set_pending();
+    // }
     #[inline]
     pub(crate) fn set_deteriorated(&mut self) {
         self.info.set_deteriorated();
     }
-
     #[inline]
     pub(crate) fn clear_pending(&mut self) {
         self.info.clear_pending();
@@ -130,11 +140,13 @@ impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
         let mut code = [0u8; 1];
         loop {
             if 0 == self.reader.inner_ref().read(&mut code[..]).await? {
+                // FIXME: it may be better to raise error 'Connection unexpectedly closed by server'
                 return Ok(None);
             }
 
             match code[0] as u64 {
                 SERVER_PONG => {
+                    self.clear_pending();
                     return Ok(Some(Response::Pong));
                 }
                 SERVER_END_OF_STREAM => {
@@ -204,9 +216,15 @@ impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
     }
 
     #[inline]
-    pub(crate) async fn next(&mut self, timeout: Duration) -> Result<Option<Response>> {
+    pub(crate) async fn next(&mut self) -> Result<Option<Response>> {
+        let timeout = self.timeout;
         with_timeout(self.inner_next(), timeout).await
     }
+
+    // #[inline]
+    // pub(crate) async fn next_with_timeout(&mut self, timeout: Duration) -> Result<Option<Response>> {
+    //     with_timeout(self.inner_next(), timeout).await
+    // }
 }
 
 async fn read_block_info<R>(reader: R) -> Result<BlockInfo>
@@ -298,6 +316,32 @@ where
         2 => LowCardinalityColumn::<u32>::load_column(reader, rows, keys).await,
         3 => LowCardinalityColumn::<u64>::load_column(reader, rows, keys).await,
         _ => err!(DriverError::BrokenData),
+    }
+}
+// One rank array limited
+async fn load_array_column<R>(reader: R, field: &Field, rows: u64) -> Result<Box<dyn AsInColumn>>
+where
+    R: AsyncBufRead + Unpin,
+{
+    match field.sql_type {
+        SqlType::UInt8 | SqlType::Int8 => FixedArrayColumn::<u8>::load_column(reader, rows).await,
+        SqlType::UInt16 | SqlType::Int16 | SqlType::Date => {
+            FixedArrayColumn::<u16>::load_column(reader, rows).await
+        }
+        SqlType::UInt32 | SqlType::Int32 | SqlType::DateTime | SqlType::Float32 | SqlType::Ipv4 => {
+            FixedArrayColumn::<u32>::load_column(reader, rows).await
+        }
+        SqlType::UInt64 | SqlType::Int64 | SqlType::DateTime64(..) | SqlType::Float64 => {
+            FixedArrayColumn::<u64>::load_column(reader, rows).await
+        }
+        SqlType::Decimal(s, _) if i32::fit(s) => {
+            FixedArrayColumn::<u32>::load_column(reader, rows).await
+        }
+        SqlType::Decimal(s, _) if i64::fit(s) => {
+            FixedArrayColumn::<u32>::load_column(reader, rows).await
+        }
+        SqlType::Ipv6 | SqlType::Uuid => FixedArrayColumn::<u128>::load_column(reader, rows).await,
+        _ => return err!(DriverError::UnsupportedType(field.sql_type)),
     }
 }
 
@@ -450,8 +494,7 @@ where
                 unsafe { columns.get_unchecked(col_idx as usize).field.clone() }
             }
         };
-
-        if field.is_array() {
+        if field.is_array() && field.depth > 1 {
             return err!(DriverError::UnsupportedType(SqlType::Array));
         } else if field.is_lowcardinality() && field.sql_type != SqlType::String {
             return err!(DriverError::UnsupportedType(SqlType::LowCardinality));
@@ -459,6 +502,8 @@ where
         // Read DATA
         let col = if block_info.rows == 0 {
             Box::new(()) as Box<dyn AsInColumn>
+        } else if field.is_array() {
+            load_array_column(reader.borrow_mut(), &field, block_info.rows).await?
         } else if field.is_lowcardinality() {
             load_lowcardinality_string(reader.borrow_mut(), &field, block_info.rows).await?
         } else {

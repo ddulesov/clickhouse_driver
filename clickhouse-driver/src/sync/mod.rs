@@ -3,3 +3,5 @@
 // While stopping pool we have to signal all pending tasks that it is not possible for notifier.
 //
 mod condvar {}
+mod waker_set;
+pub use waker_set::WakerSet;

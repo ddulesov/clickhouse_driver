@@ -39,6 +39,7 @@ macro_rules! field {
     ($sql_type: expr) => {
         Ok(Field {
             sql_type: $sql_type,
+            depth: 0,
             flag: FIELD_NONE,
             meta: None,
         })
@@ -132,6 +133,7 @@ impl<'a> EnumParser<'a> {
             Ok(Field {
                 sql_type,
                 flag: FIELD_NONE,
+                depth: 0,
                 meta: Some(FieldMeta { index }),
             })
         } else {
@@ -246,37 +248,39 @@ impl DateTimeParser {
 }
 
 #[inline]
-fn parse_type_flags(t: &str) -> (u8, &str) {
+fn parse_type_flags(t: &str) -> (u8, u8, &str) {
     let mut flag: u8 = 0;
+    let mut depth: u8 = 0;
+    // TODO: redesign
 
-    let t = if t.starts_with("Nullable(") && t.ends_with(')') {
-        flag |= FIELD_NULLABLE;
-        &t[9..t.len() - 1]
-    } else {
-        t
-    };
-    let t = if t.starts_with("LowCardinality(") && t.ends_with(')') {
+    let mut t = if t.starts_with("LowCardinality(") && t.ends_with(')') {
         flag |= FIELD_LOWCARDINALITY;
         &t[15..t.len() - 1]
     } else {
         t
     };
-    let t = if t.starts_with("Array(") && t.ends_with(')') {
-        flag |= FIELD_ARRAY;
+    t = if t.starts_with("Nullable(") && t.ends_with(')') {
+        flag |= FIELD_NULLABLE;
         &t[9..t.len() - 1]
     } else {
         t
     };
-    (flag, t)
+    while t.len() > 7 && t.starts_with("Array(") && t.ends_with(')') {
+        flag |= FIELD_ARRAY;
+        depth += 1;
+        t = &t[6..t.len() - 1];
+    }
+    (flag, depth, t)
 }
 
 pub fn parse_type_field(t: &str) -> Result<Field> {
-    let (flag, t) = parse_type_flags(t);
+    let (flag, depth, t) = parse_type_flags(t);
     macro_rules! field {
         ($sql_type: expr) => {
             Ok(Field {
                 sql_type: $sql_type,
                 flag,
+                depth,
                 meta: None,
             })
         };
@@ -313,14 +317,17 @@ pub fn parse_type_field(t: &str) -> Result<Field> {
     } else if t.starts_with("Decimal") {
         let mut field = DecimalParser::parse_str(t)?;
         field.flag = flag;
+        field.depth = depth;
         return Ok(field);
     } else if t.starts_with("Enum") {
         let mut field = EnumParser::parse_str(t)?;
         field.flag = flag;
+        field.depth = depth;
         return Ok(field);
     } else if t.starts_with("Date") {
         let mut field = DateTimeParser::parse_str(t)?;
         field.flag = flag;
+        field.depth = depth;
         return Ok(field);
     } else if t.starts_with("FixedString(") {
         if let Ok(sz) = u32::from_str(&t[12..t.len() - 1]) {
@@ -333,12 +340,54 @@ pub fn parse_type_field(t: &str) -> Result<Field> {
 
 #[cfg(test)]
 mod test {
+    use super::{parse_type_field, DateTimeParser, DecimalParser, EnumParser};
+    use crate::types::SqlType;
+    use crate::types::{FIELD_ARRAY, FIELD_LOWCARDINALITY, FIELD_NONE, FIELD_NULLABLE};
     use chrono_tz::Europe::Moscow;
     use chrono_tz::Tz;
 
-    use crate::types::SqlType;
+    #[test]
+    fn test_parse_basic() {
+        let types = [
+            "UInt8", "Int8", "UInt16", "Int16", "UInt32", "Int32", "UInt64", "Int64", "Float32",
+            "Float64", "UUID", "IPv4", "IPv6", "String",
+        ];
 
-    use super::{DateTimeParser, DecimalParser, EnumParser};
+        for t in types.iter() {
+            let t = parse_type_field(*t).unwrap();
+            assert_eq!(FIELD_NONE, t.flag);
+        }
+    }
+
+    #[test]
+    fn test_parse_array() {
+        let types = [
+            "Array(UInt8)",
+            "Array(Int8)",
+            "Array(UInt16)",
+            "Array(Int16)",
+            "Array(UInt32)",
+            "Array(Int32)",
+            "Array(UInt64)",
+            "Array(Int64)",
+            "Array(Float32)",
+            "Array(Float64)",
+            "Array(UUID)",
+            "Array(IPv4)",
+            "Array(IPv6)",
+            "Array(String)",
+        ];
+
+        for t in types.iter() {
+            let t = parse_type_field(*t).unwrap();
+            assert_eq!(FIELD_ARRAY, t.flag);
+            assert_eq!(1, t.depth);
+        }
+        let t = parse_type_field("Array(Array(Decimal(9,3)))").unwrap();
+        assert_eq!(FIELD_ARRAY, t.flag);
+        assert_eq!(2, t.depth);
+        assert_eq!(SqlType::Decimal(9, 3), t.sql_type);
+    }
 
     #[test]
     fn test_parse_enum8() {
@@ -421,5 +470,17 @@ mod test {
 
         let type_decimal: &str = "DateTime64()";
         assert!(DateTimeParser::parse_str(type_decimal).is_err());
+    }
+
+    #[test]
+    fn test_parse_lowcardinality() {
+        let type_decimal: &str = "LowCardinality(String)";
+        let field = parse_type_field(type_decimal).unwrap();
+        assert_eq!(SqlType::String, field.sql_type);
+        assert_eq!(FIELD_LOWCARDINALITY, field.flag);
+        let type_decimal: &str = "LowCardinality(Nullable(String))";
+        let field = parse_type_field(type_decimal).unwrap();
+        assert_eq!(SqlType::String, field.sql_type);
+        assert_eq!(FIELD_LOWCARDINALITY | FIELD_NULLABLE, field.flag);
     }
 }

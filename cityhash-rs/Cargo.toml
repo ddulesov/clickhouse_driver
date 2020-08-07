@@ -4,6 +4,8 @@ description = "rust CityHash for ClickHouse Asynchronous Driver."
 version = "0.1.1"
 authors = ["dmitry dulesov <dmitry.dulesov@gmail.com>"]
 edition = "2018"
+license = "MIT"
+repository = "https://github.com/ddulesov/clickhouse_driver"
 
 [dependencies]
 
