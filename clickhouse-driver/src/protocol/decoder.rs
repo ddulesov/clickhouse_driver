@@ -5,33 +5,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt};
 
-// pub(crate) struct ReadBool<'a, R: ?Sized> {
-//     inner: &'a mut R,
-// }
-//
-// impl<'a, R: AsyncRead> ReadBool<'a, R> {
-//     fn poll_get(&mut self, cx: &mut Context<'_>) -> Poll<Result<u8>> {
-//         let mut b = [0u8; 1];
-//         {
-//             let inner = unsafe { Pin::new_unchecked(&mut *self.inner) };
-//
-//             if 0 == ready!(inner.poll_read(cx, &mut b)?) {
-//                 return Poll::Ready(Err(DriverError::BrokenData.into()));
-//             };
-//         }
-//         Ok(b[0]).into()
-//     }
-// }
-//
-// impl<'a, R: AsyncRead> Future for ReadBool<'a, R> {
-//     type Output = Result<u8>;
-//
-//     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-//         let me = &mut *self;
-//         me.poll_get(cx)
-//     }
-// }
-
+/// Read string data encoded as VarInt(length) + bytearray
 pub(crate) struct ReadVString<'a, T: FromBytes, R> {
     length_: usize,
     data: Vec<u8>,
@@ -77,9 +51,6 @@ impl<'a, T: FromBytes, R: AsyncRead> ReadVString<'a, T, R> {
     fn poll_get(&mut self, cx: &mut Context<'_>) -> Poll<Result<T>> {
         loop {
             if self.length_ == self.data.len() {
-                // In any case reset length
-                self.length_ = 0;
-                //let s = std::mem::replace(&mut self.data, Vec::new());
                 return FromBytes::from_bytes(&mut self.data).into();
             } else {
                 self.length_ += ready!(self
@@ -99,7 +70,7 @@ impl<'a, T: FromBytes, R: AsyncRead> Future for ReadVString<'a, T, R> {
         me.poll_get(cx)
     }
 }
-
+/// Read VarInt
 pub(crate) struct ReadVInt<'a, R> {
     value: u64,
     i: u8,
@@ -156,11 +127,11 @@ impl<R: AsyncRead> ValueReader<R> {
     pub(super) fn new(reader: R) -> ValueReader<R> {
         ValueReader { inner: reader }
     }
-    //TODO: Optimize read using buffered data
+    //TODO: Optimize reading note that reader is buffered data
     pub(super) fn read_vint(&mut self) -> ReadVInt<'_, R> {
         ReadVInt::new(&mut self.inner)
     }
-    //TODO: Optimize read using buffered data
+    //TODO:  Optimize reading note that reader is buffered data
     pub(super) fn read_string<T: FromBytes>(&mut self, len: u64) -> ReadVString<'_, T, R> {
         ReadVString::new(&mut self.inner, len as usize)
     }

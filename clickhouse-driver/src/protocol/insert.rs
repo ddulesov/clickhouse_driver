@@ -1,10 +1,9 @@
 use futures::TryFutureExt;
 use std::marker::Unpin;
-use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use super::block::{Block, BlockColumnHeader, EmptyBlock, OutputBlockWrapper, ServerBlock};
-use super::command::{CommandSink, ResponseStream};
+use super::command::ResponseStream;
 use crate::errors::{ConversionError, DriverError, Result};
 
 use super::ServerWriter;
@@ -12,28 +11,21 @@ use crate::protocol::column::{ColumnDataAdapter, EnumIndex};
 
 const DEFAULT_INSERT_BUFFER_SIZE: usize = 8 * 1024;
 
-pub struct InsertSink<'a, R: AsyncRead + Unpin + Send, W> {
+pub struct InsertSink<'a, R: AsyncRead + AsyncWrite + Unpin + Send> {
     pub(crate) inner: ResponseStream<'a, R>,
-    pub(crate) sink: CommandSink<W>,
     pub(crate) buf: Vec<u8>,
-    pub(crate) timeout: Duration,
     #[allow(dead_code)]
     pub(crate) columns: Vec<BlockColumnHeader>,
 }
 
-impl<'a, R: AsyncRead + Unpin + Send, W> Drop for InsertSink<'a, R, W> {
+impl<'a, R: AsyncRead + AsyncWrite + Unpin + Send> Drop for InsertSink<'a, R> {
     fn drop(&mut self) {
         self.inner.clear_pending()
     }
 }
 
-impl<'a, R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin> InsertSink<'a, R, W> {
-    pub(crate) fn new(
-        tcpstream: ResponseStream<'a, R>,
-        sink: CommandSink<W>,
-        block: ServerBlock,
-        timeout: Duration,
-    ) -> InsertSink<'a, R, W> {
+impl<'a, R: AsyncRead + AsyncWrite + Unpin + Send> InsertSink<'a, R> {
+    pub(crate) fn new(tcpstream: ResponseStream<'a, R>, block: ServerBlock) -> InsertSink<'a, R> {
         let buf = Vec::with_capacity(DEFAULT_INSERT_BUFFER_SIZE);
 
         let mut columns = block.into_headers();
@@ -46,9 +38,7 @@ impl<'a, R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin> InsertSink<'a, R, W
 
         InsertSink {
             inner: tcpstream,
-            sink,
             buf,
-            timeout,
             columns,
         }
     }
@@ -88,9 +78,8 @@ impl<'a, R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin> InsertSink<'a, R, W
         }
         .write(self.inner.info_ref(), &mut self.buf)?;
 
-        self.sink
-            .writer
-            .write_all(self.buf.as_ref())
+        self.inner
+            .write(self.buf.as_slice())
             .map_err(Into::into)
             .await
     }
@@ -117,9 +106,9 @@ impl<'a, R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin> InsertSink<'a, R, W
     pub async fn commit(&mut self) -> Result<()> {
         self.buf.clear();
         EmptyBlock.write(self.inner.info_ref(), &mut self.buf)?;
-        self.sink.writer.write_all(self.buf.as_ref()).await?;
+        self.inner.write(self.buf.as_slice()).await?;
 
-        if let Some(packet) = self.inner.next(self.timeout).await? {
+        if let Some(packet) = self.inner.next().await? {
             return Err(DriverError::PacketOutOfOrder(packet.code()).into());
         }
         // Disable fuse. it allows us to make intermediate  commits

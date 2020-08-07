@@ -52,13 +52,13 @@ extern crate lazy_static;
 #[cfg(lz4)]
 extern crate clickhouse_driver_lz4a;
 extern crate log;
+extern crate parking_lot;
 #[cfg(test)]
 extern crate rand;
 extern crate thiserror;
 extern crate tokio;
 extern crate url;
 extern crate uuid;
-
 use pool::options::Options;
 
 #[cfg(not(target_endian = "little"))]
@@ -71,6 +71,7 @@ mod pool;
 pub mod prelude;
 #[macro_use]
 mod protocol;
+mod sync;
 mod types;
 
 #[allow(dead_code)]

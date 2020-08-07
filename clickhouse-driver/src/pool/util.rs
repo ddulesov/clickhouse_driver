@@ -41,6 +41,7 @@ impl<'a> Iterator for AddrIter<'a> {
 /// - The number of idle connections in pool
 /// - The total number of issued connections including idle and active
 /// - The number of tasks that are waiting for available connection
+#[derive(Debug)]
 pub struct PoolInfo {
     pub idle: usize,
     pub issued: usize,

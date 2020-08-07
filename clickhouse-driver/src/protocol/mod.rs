@@ -92,6 +92,9 @@ use value::{
     ValueUuid,
 };
 
+#[cfg(feature = "extra")]
+mod simd;
+
 pub mod block;
 pub mod code;
 pub mod column;
@@ -128,10 +131,11 @@ pub(crate) fn rip() -> u64 {
 #[derive(Debug)]
 pub enum ValueRefEnum<'a> {
     String(&'a [u8]),
-    //Array8(&'a [u8] ),
-    //Array16(&'a [u16]),
-    //Array32(&'a [u32]),
-    //Array64(&'a [u64]),
+    Array8(&'a [u8]),
+    Array16(&'a [u16]),
+    Array32(&'a [u32]),
+    Array64(&'a [u64]),
+    Array128(&'a [u128]),
     UInt8(u8),
     UInt16(u16),
     UInt32(u32),

@@ -65,7 +65,18 @@ pub const FIELD_ARRAY: u8 = 0x04;
 pub struct Field {
     pub(crate) sql_type: SqlType,
     pub(crate) flag: u8,
+    pub(crate) depth: u8,
     meta: Option<FieldMeta>,
+}
+
+impl fmt::Debug for Field {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Field")
+            .field("sql_type", &self.sql_type)
+            .field("flag", &self.flag)
+            .field("depth", &self.depth)
+            .finish()
+    }
 }
 
 impl Clone for Field {
@@ -73,6 +84,7 @@ impl Clone for Field {
         Field {
             sql_type: self.sql_type,
             flag: self.flag,
+            depth: self.depth,
             meta: {
                 match &self.meta {
                     None => None,
@@ -169,7 +181,7 @@ pub enum SqlType {
     Decimal(u8, u8),
     Enum8,
     Enum16,
-    // type placeholders
+    // type placeholders. don't really instantiate this types
     Array,
     LowCardinality,
 }
@@ -251,6 +263,7 @@ mod test {
         let f = Field {
             sql_type: SqlType::String,
             flag: FIELD_NONE,
+            depth: 0,
             meta: None,
         };
 
@@ -263,6 +276,7 @@ mod test {
         let f = Field {
             sql_type: SqlType::String,
             flag: FIELD_NULLABLE,
+            depth: 0,
             meta: None,
         };
         f.encode(&mut buf).unwrap();
@@ -275,6 +289,7 @@ mod test {
         let f = Field {
             sql_type: SqlType::FixedString(20),
             flag: FIELD_NULLABLE,
+            depth: 0,
             meta: None,
         };
         f.encode(&mut buf).unwrap();
@@ -283,6 +298,7 @@ mod test {
         let f = Field {
             sql_type: SqlType::Decimal(18, 4),
             flag: FIELD_NULLABLE,
+            depth: 0,
             meta: None,
         };
         f.encode(&mut buf).unwrap();
@@ -299,6 +315,7 @@ mod test {
         let f = Field {
             sql_type: SqlType::Enum8,
             flag: FIELD_NONE,
+            depth: 0,
             meta: Some(FieldMeta { index }),
         };
         f.encode(&mut buf).unwrap();

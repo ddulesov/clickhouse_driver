@@ -71,7 +71,7 @@ pub struct Options {
     //pub(crate) certificate: Option<Certificate>,
 
     /// Restricts permissions for read data, write data and change settings queries.
-    pub(crate) readonly: Option<u8>,
+    pub(crate) readonly: u8,
 
     /// The number of retries to send request to server. (defaults to `3`)
     pub(crate) send_retries: u8,
@@ -142,17 +142,13 @@ fn parse_opt_duration(source: &str) -> Result<Option<Duration>> {
     Ok(Some(duration))
 }
 
-fn parse_opt_u8(source: &str) -> Result<Option<u8>> {
-    if source == "none" {
-        return Ok(None);
-    }
-
+fn parse_u8(source: &str) -> Result<u8> {
     let duration: u8 = match source.parse() {
         Ok(value) => value,
         Err(_) => return Err(UrlError::Invalid),
     };
 
-    Ok(Some(duration))
+    Ok(duration)
 }
 
 fn parse_compression(source: &str) -> Result<CompressionMethod> {
@@ -231,7 +227,7 @@ impl Options {
                 "secure" => options.secure = parse_param(key, value, bool::from_str)?,
                 #[cfg(feature = "tls")]
                 "skip_verify" => options.skip_verify = parse_param(key, value, bool::from_str)?,
-                "readonly" => options.readonly = parse_param(key, value, parse_opt_u8)?,
+                "readonly" => options.readonly = parse_param(key, value, parse_u8)?,
                 "host" => options.addr.push(value.into_owned()),
                 _ => return Err(UrlError::UnknownParameter { param: key.into() }),
             };
@@ -242,6 +238,14 @@ impl Options {
 
     pub fn set_compression(mut self, compression: CompressionMethod) -> Self {
         self.compression = compression;
+        self
+    }
+
+    pub fn set_timeout(mut self, timeout: Duration) -> Self {
+        self.ping_timeout = timeout;
+        self.execute_timeout = timeout;
+        self.query_timeout = timeout;
+        self.insert_timeout = timeout;
         self
     }
 }
@@ -294,7 +298,7 @@ impl Default for Options {
             secure: false,
             #[cfg(feature = "tls")]
             skip_verify: false,
-            readonly: None,
+            readonly: 0,
         }
     }
 }

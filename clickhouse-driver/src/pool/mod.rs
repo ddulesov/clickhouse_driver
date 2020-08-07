@@ -5,20 +5,28 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(feature = "recycle")]
+use tokio::sync;
+
 pub use builder::PoolBuilder;
 use crossbeam::queue;
 pub use options::CompressionMethod;
 pub use options::Options;
-use tokio::sync;
+use parking_lot::Mutex;
 use tokio::time::delay_for;
 use util::*;
 
 use crate::{
     client::{disconnect, Connection, InnerConection},
     errors::{Error, Result},
+    sync::WakerSet,
 };
 
 use self::disconnect::DisconnectPool;
+use crate::errors::DriverError;
+use futures::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 pub mod builder;
 mod disconnect;
@@ -43,11 +51,11 @@ pub(crate) struct Inner {
     new: queue::ArrayQueue<Box<InnerConection>>,
     /// The number of issued connections
     /// This value is in range of 0 .. options.max_pool
-    issued: atomic::AtomicUsize,
+    lock: Mutex<usize>,
     /// Pool options
     pub(crate) options: Options,
     /// Used for notification of tasks which wait for available connection
-    notifyer: sync::Notify,
+    wakers: WakerSet,
     #[cfg(feature = "recycle")]
     recycler: Option<sync::mpsc::UnboundedReceiver<Option<Box<InnerConection>>>>,
     /// Server host addresses
@@ -55,7 +63,7 @@ pub(crate) struct Inner {
     /// The number of active connections that is taken by tasks
     connections_num: atomic::AtomicUsize,
     /// Number of tasks in waiting queue
-    wait: atomic::AtomicUsize,
+    //wait: atomic::AtomicUsize,
     /// Pool status flag
     close: atomic::AtomicI8,
 }
@@ -83,7 +91,69 @@ impl Inner {
     }
 
     fn closed(&self) -> bool {
-        self.close.load(atomic::Ordering::Acquire) > POOL_STATUS_SERVE
+        self.close.load(atomic::Ordering::Relaxed) > POOL_STATUS_SERVE
+    }
+
+    /// Take back connection to pool if connection is not deterogated
+    /// and pool is not full . Recycle in other case.
+    pub(crate) fn return_connection(&self, conn: Box<InnerConection>) {
+        // NOTE: It's  safe to call it out of tokio runtime
+        let conn = if conn.is_ok()
+            && conn.info.flag == 0
+            && !self.closed()
+            && self.new.len() < self.options.pool_min as usize
+        {
+            let lock = self.lock.lock();
+            match self.new.push(conn) {
+                Ok(_) => {
+                    self.wakers.notify_one();
+                    drop(lock);
+                    return;
+                }
+                Err(econn) => econn.0,
+            }
+        } else {
+            conn
+        };
+        {
+            let mut lock = self.lock.lock();
+            *lock -= 1;
+            //self.issued.fetch_sub(1, Ordering::AcqRel);
+            disconnect(conn);
+            // NOTE! Release right before notify
+            drop(lock);
+        }
+        self.wakers.notify_one();
+    }
+}
+
+struct AwaitConnection<'a, F> {
+    key: Option<usize>,
+    wakers: &'a WakerSet,
+    inner: &'a Inner,
+    f: F,
+}
+
+impl<F: FnMut(usize, &Inner) -> bool> Future for AwaitConnection<'_, F> {
+    type Output = bool;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let me = unsafe { Pin::get_unchecked_mut(self) };
+        let lock = me.inner.lock.lock();
+        if let Some(key) = me.key.take() {
+            if me.wakers.remove_if_notified(key, cx) {
+                me.key = None;
+                Poll::Ready((me.f)(*lock, me.inner))
+            } else {
+                Poll::Pending
+            }
+        } else if (me.f)(*lock, me.inner) {
+            Poll::Ready(true)
+        } else {
+            let key = me.wakers.insert(cx);
+            me.key = Some(key);
+            Poll::Pending
+        }
     }
 }
 
@@ -98,17 +168,18 @@ pub struct Pool {
 
 impl fmt::Debug for Pool {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let issued = unsafe { *self.inner.lock.data_ptr() };
         f.debug_struct("Pool")
             .field("inner.min", &self.inner.options.pool_min)
             .field("inner.max", &self.inner.options.pool_max)
             .field("queue len", &self.inner.new.len())
-            .field("issued", &self.inner.issued)
+            .field("issued", &issued)
             .finish()
     }
 }
 
 impl Pool {
-    /// Create pool object from options or url.
+    /// Create pool object from Options object or url string.
     ///
     /// # Example
     /// ```
@@ -126,26 +197,45 @@ impl Pool {
     }
 
     /// Return pool current status.
+    /// `idle` - number of idle connections in pool
+    /// `issued` - total number of issued connections
+    /// `wait` - number of tasks waiting for a connection
     #[inline(always)]
     pub fn info(&self) -> PoolInfo {
         let inner = &self.inner;
 
         util::PoolInfo {
             idle: inner.new.len(),
-            issued: inner.issued.load(Ordering::Relaxed),
-            wait: inner.wait.load(Ordering::Relaxed),
+            issued: unsafe { *inner.lock.data_ptr() },
+            wait: inner.wakers.len(),
         }
     }
 
-    /// Request new connection. Return connection from poll or create new if
-    /// poll doesn't have idle connections
+    /// Return a connection from poll or create new if
+    /// the poll doesn't have idle connections
     pub async fn connection(&self) -> Result<Connection> {
-        let inner = &self.inner;
+        let inner = &*self.inner;
         loop {
-            if inner.closed() {
-                return Err(crate::errors::DriverError::PoolDisconnected.into());
+            let ok = AwaitConnection {
+                key: None,
+                wakers: &inner.wakers,
+                inner: &inner,
+                f: |issued: usize, inner: &Inner| {
+                    inner.closed()
+                        || !inner.new.is_empty()
+                        || issued < inner.options.pool_max as usize
+                },
             }
-            if let Ok(conn) = inner.new.pop() {
+            .await;
+            if !ok {
+                continue;
+            }
+
+            if inner.closed() {
+                return Err(DriverError::PoolDisconnected.into());
+            }
+
+            if let Ok(conn) = self.inner.new.pop() {
                 let mut conn = Connection::new(self.clone(), conn);
 
                 if inner.options.ping_before_query {
@@ -169,30 +259,25 @@ impl Pool {
                 } else {
                     return Ok(conn);
                 }
-            };
-
-            let num = inner.issued.load(Ordering::Relaxed);
-
-            if num >= inner.options.pool_max as usize {
-                inner.wait.fetch_add(1, Ordering::AcqRel);
-                inner.notifyer.notified().await;
-                inner.wait.fetch_sub(1, Ordering::AcqRel);
             } else {
-                let num = inner.issued.fetch_add(1, Ordering::AcqRel);
-                if num < inner.options.pool_max as usize {
-                    break;
-                } else {
-                    inner.issued.fetch_sub(1, Ordering::AcqRel);
-                }
-            }
-        }
+                let mut lock = inner.lock.lock();
 
+                if *lock < inner.options.pool_max as usize {
+                    // reserve quota...
+                    *lock += 1;
+                    // ...and goto create new connection releasing lock for other clients
+                    break;
+                }
+            };
+        }
+        // create new connection
         for addr in self.get_addr_iter() {
-            match InnerConection::init(inner, addr).await {
+            match InnerConection::init(&inner.options, addr).await {
                 Ok(conn) => {
                     return Ok(Connection::new(self.clone(), conn));
                 }
                 Err(err) => {
+                    // On timeout repeat connection with another address
                     if !err.is_timeout() {
                         return Err(err);
                     }
@@ -200,80 +285,51 @@ impl Pool {
             }
         }
 
-        //release quota
-        inner.issued.fetch_sub(1, Ordering::AcqRel);
-        self.inner.notifyer.notify();
+        // Release quota if failed to establish new connection
+        let mut lock = inner.lock.lock();
+        *lock -= 1;
+        inner.wakers.notify_any();
+        drop(lock);
         Err(crate::errors::DriverError::ConnectionClosed.into())
     }
 
-    /// Return connection  to pool
+    /// Take a connection back to pool
+    #[inline]
     pub fn return_connection(&self, mut conn: Connection) {
         // NOTE: It's  safe to call it out of tokio runtime
         let pool = conn.pool.take();
         debug_assert_eq!(pool.as_ref().unwrap(), self);
 
-        self.return_conn(conn.take());
+        self.inner.return_connection(conn.take());
     }
 
-    /// Take back connection to pool if connection is not deterogated
-    /// and pool is not full . Recycle in other case.
-    pub(crate) fn return_conn(&self, conn: Box<InnerConection>) {
-        // NOTE: It's  safe to call it out of tokio runtime
-        let conn = if conn.is_ok()
-            && !conn.info.flag == 0
-            && !self.inner.closed()
-            && self.inner.new.len() < self.inner.options.pool_min as usize
-        {
-            match self.inner.new.push(conn) {
-                Ok(_) => {
-                    self.inner.notifyer.notify();
-                    return;
-                }
-                Err(econn) => econn.0,
-            }
-        } else {
-            conn
-        };
-
-        self.inner.issued.fetch_sub(1, Ordering::AcqRel);
-        self.inner.notifyer.notify();
-        self.send_to_recycler(conn);
-    }
-
-    #[cfg(not(feature = "recycle"))]
-    #[inline]
-    fn send_to_recycler(&self, conn: Box<InnerConection>) {
-        disconnect(conn);
-    }
-
-    #[cfg(feature = "recycle")]
-    #[inline]
-    fn send_to_recycler(&self, conn: Box<InnerConection>) {
-        if let Err(conn) = self.drop.send(Some(conn)) {
-            let conn = conn.0.unwrap();
-            // This _probably_ means that the Runtime is shutting down, and that the Recycler was
-            // dropped rather than allowed to exit cleanly.
-            if self.inner.close.load(atomic::Ordering::SeqCst) != POOL_STATUS_STOPPED {
-                // Yup, Recycler was forcibly dropped!
-                // All we can do here is try the non-pool drop path for Conn.
-                drop(conn);
-            } else {
-                unreachable!("Recycler exited while connections still exist");
-            }
-        }
-    }
-
-    #[cfg(feature = "recycle")]
-    pub fn disconnect(self) -> DisconnectPool {
-        let _ = self.drop.send(None).is_ok();
-        DisconnectPool::new(self)
-    }
-
-    #[cfg(not(feature = "recycle"))]
+    // #[cfg(not(feature = "recycle"))]
+    // #[inline]
+    // fn send_to_recycler(&self, conn: Box<InnerConection>) {
+    //     disconnect(conn);
+    // }
+    //
+    // #[cfg(feature = "recycle")]
+    // #[inline]
+    // fn send_to_recycler(&self, conn: Box<InnerConection>) {
+    //     if let Err(conn) = self.drop.send(Some(conn)) {
+    //         let conn = conn.0.unwrap();
+    //         // This _probably_ means that the Runtime is shutting down, and that the Recycler was
+    //         // dropped rather than allowed to exit cleanly.
+    //         if self.inner.close.load(atomic::Ordering::SeqCst) != POOL_STATUS_STOPPED {
+    //             // Yup, Recycler was forcibly dropped!
+    //             // All we can do here is try the non-pool drop path for Conn.
+    //             drop(conn);
+    //         } else {
+    //             unreachable!("Recycler exited while connections still exist");
+    //         }
+    //     }
+    // }
+    /// Close the pool and all issued connections
     pub fn disconnect(self) -> DisconnectPool {
         DisconnectPool::new(self)
     }
-
+    /// Iterate over available host
     fn get_addr_iter(&'_ self) -> AddrIter<'_> {
         let inner = &self.inner;
         let index = if inner.hosts.len() > 1 {
@@ -283,7 +339,8 @@ impl Pool {
         };
         util::AddrIter::new(inner.hosts.as_slice(), index, self.options().send_retries)
     }
-
+    /// Return Option object used for creation pool
+    /// @note! the option does not have hosts
     #[inline]
     pub fn options(&self) -> &Options {
         &self.inner.options

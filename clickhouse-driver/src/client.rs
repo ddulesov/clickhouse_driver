@@ -3,12 +3,11 @@ use std::io;
 use std::net::Shutdown;
 use std::time::Duration;
 
-use crate::pool::Inner as InnerPool;
 use crate::protocol::block::{Block, ServerBlock};
 use crate::protocol::command::{CommandSink, ResponseStream};
 use crate::protocol::insert::InsertSink;
 use crate::protocol::packet::Response;
-use crate::protocol::packet::{Command, Execute, Hello, Ping};
+use crate::protocol::packet::{Execute, Hello, Ping};
 use crate::protocol::query::Query;
 use crate::protocol::ServerWriter;
 use crate::{
@@ -19,15 +18,19 @@ use crate::{
     },
 };
 use chrono_tz::Tz;
-use log::info;
+use futures::Future;
+use log::{debug, info, warn};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::net::tcp::{ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 
 const DEF_OUT_BUF_SIZE: usize = 512;
+const DEFAULT_QUERY_BUF_SIZE: usize = 8 * 1024;
 /// Connection state flags
 const FLAG_DETERIORATED: u8 = 0x01;
 const FLAG_PENDING: u8 = 0x02;
+
+pub trait AsyncReadWrite: AsyncWrite + AsyncRead + Send + Unpin {}
+impl<T: AsyncWrite + AsyncRead + Send + Unpin> AsyncReadWrite for T {}
 
 #[derive(Debug)]
 pub(super) struct ServerInfo {
@@ -57,7 +60,7 @@ impl ServerInfo {
         (self.flag & FLAG_PENDING) == FLAG_PENDING
     }
 }
-
+/// Implement established connection (active or idle)
 pub(super) struct Inner {
     pub(crate) socket: Option<TcpStream>,
     pub(crate) info: ServerInfo,
@@ -65,15 +68,19 @@ pub(super) struct Inner {
 
 pub(super) type InnerConection = Inner;
 
-pub struct QueryResult<'a, R: AsyncRead, W: AsyncWrite> {
-    timeout: Duration,
+pub struct QueryResult<'a, R: AsyncRead> {
     pub(crate) inner: ResponseStream<'a, R>,
-    sink: CommandSink<W>,
 }
 
-impl<'a, R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin> QueryResult<'a, R, W> {
+impl<'a, R: AsyncWrite + AsyncRead + Unpin + Send> QueryResult<'a, R> {
+    pub fn cancel(&'a mut self) -> impl Future<Output = Result<()>> + 'a {
+        self.inner.cancel()
+    }
+}
+
+impl<'a, R: AsyncRead + Unpin + Send> QueryResult<'a, R> {
     pub async fn next(&mut self) -> Result<Option<ServerBlock>> {
-        while let Some(packet) = self.inner.next(self.timeout).await? {
+        while let Some(packet) = self.inner.next().await? {
             if let Response::Data(block) = packet {
                 return Ok(Some(block));
             } else {
@@ -87,14 +94,9 @@ impl<'a, R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin> QueryResult<'a, R, 
     pub fn is_pending(&self) -> bool {
         self.inner.is_pending()
     }
-
-    #[inline]
-    pub async fn cancel(&mut self) {
-        let _r = self.sink.cancel().await;
-    }
 }
 
-impl<'a, R: AsyncRead, W: AsyncWrite> Drop for QueryResult<'a, R, W> {
+impl<'a, R: AsyncRead> Drop for QueryResult<'a, R> {
     fn drop(&mut self) {}
 }
 
@@ -126,43 +128,40 @@ impl Inner {
     fn is_null(&self) -> bool {
         self.socket.is_none()
     }
-    /// Check if the socket is connected to peer
+    /// Check if the socket is connected to a peer
     pub(super) fn is_ok(&self) -> bool {
         self.socket
             .as_ref()
             .map_or(false, |socket| socket.peer_addr().is_ok())
     }
 
-    /// Split self into Tcp read-half, Tcp write-half, and ServerInfo
-    pub(super) fn split(&mut self) -> Option<(ReadHalf<'_>, WriteHalf<'_>, &mut ServerInfo)> {
+    /// Split self into Stream and ServerInfo
+    #[inline]
+    pub(super) fn split(&mut self) -> Option<(&mut (dyn AsyncReadWrite + '_), &mut ServerInfo)> {
         let info = &mut self.info as *mut ServerInfo;
         // SAFETY: This can be risky if caller use returned values inside Connection
-        // or InnerConnection methods. Nothing do it.
+        // or InnerConnection methods. Never do it.
         match self.socket {
             None => None,
-            Some(ref mut socket) => unsafe {
-                let (rdr, wrt) = socket.split();
-                Some((rdr, wrt, &mut *info))
-            },
+            Some(ref mut socket) => unsafe { Some((socket, &mut *info)) },
         }
     }
 
-    /// Establish a connection with the server
-    pub(super) async fn init(inner_pool: &InnerPool, addr: &str) -> Result<Box<Inner>> {
+    /// Establish a connection to a Clickhouse server
+    pub(super) async fn init(options: &Options, addr: &str) -> Result<Box<Inner>> {
         let socket = TcpStream::connect(addr).await?;
-        Inner::setup_stream(&socket, &inner_pool.options)?;
+        Inner::setup_stream(&socket, &options)?;
         info!(
             "connection  established to: {}",
             socket.peer_addr().unwrap()
         );
-
-        let conn = Inner::handshake(socket, &inner_pool.options).await?;
+        // TODO: Tls handshake for secure connection like
+        // https://github.com/tokio-rs/tls/blob/master/tokio-native-tls/examples/download-rust-lang.rs
+        let conn = Inner::handshake(socket, &options).await?;
         Ok(conn)
     }
-
-    pub async fn handshake(mut socket: TcpStream, options: &Options) -> Result<Box<Self>> {
-        info!("handshake complete");
-
+    /// Negotiate connection parameters such as timezone, revision, compression
+    async fn handshake(mut socket: TcpStream, options: &Options) -> Result<Box<Self>> {
         let mut inner: Box<Inner> = Box::new(Default::default());
         {
             let mut buf = Vec::with_capacity(256);
@@ -170,25 +169,31 @@ impl Inner {
                 Hello { opt: options }.write(&inner.info, &mut buf)?;
             }
 
-            let (rdr, wrt) = socket.split();
-            let mut sink = CommandSink::new(wrt);
-            sink.writer.write_all(&buf[..]).await?;
+            socket.write_all(&buf[..]).await?;
+            let stream: &mut dyn AsyncReadWrite = &mut socket;
             drop(buf);
-            let mut stream = ResponseStream::with_capacity(256, rdr, &mut inner.info);
+            let mut stream = ResponseStream::with_capacity(
+                256,
+                stream,
+                &mut inner.info,
+                options.connection_timeout,
+            );
 
-            match stream.next(options.connection_timeout).await? {
-                Some(Response::Hello(_name, _major, _minor, revision, tz)) => {
-                    inner.info.revision = revision as u32;
-                    inner.info.timezone = tz;
-                    inner.socket = Some(socket);
-                }
+            let (revision, timezone) = match stream.next().await? {
+                Some(Response::Hello(_name, _major, _minor, revision, tz)) => (revision as u32, tz),
                 _ => {
                     socket.shutdown(Shutdown::Both)?;
                     return Err(DriverError::ConnectionTimeout.into());
                 }
             };
+            drop(stream);
             inner.info.compression = options.compression;
+            inner.info.revision = revision;
+            inner.info.timezone = timezone;
+            inner.info.readonly = options.readonly;
         }
+        debug!("handshake complete");
+        inner.socket = Some(socket);
         Ok(inner)
     }
 
@@ -201,13 +206,16 @@ impl Inner {
     async fn cleanup(&mut self) -> Result<()> {
         // TODO: ensure cancel command indeed interrupt long-running process
         if (self.info.flag & FLAG_PENDING) == FLAG_PENDING {
-            let wrt = if let Some((_, wrt, _info)) = self.split() {
+            //TODO: simplify. There is no reason to call `split` method
+            let wrt = if let Some((wrt, _info)) = self.split() {
                 wrt
             } else {
                 return Err(DriverError::ConnectionClosed.into());
             };
+            debug!("cleanup connection");
 
             CommandSink::new(wrt).cancel().await?;
+            info!("sent cancel message");
         };
 
         Ok(())
@@ -284,6 +292,7 @@ impl Connection {
     /// Disconnects this connection from server.
     pub(super) fn disconnect(mut self) -> Result<()> {
         if let Some(socket) = self.inner.socket.take() {
+            debug!("disconnect method. shutdown connection");
             socket.shutdown(Shutdown::Both)?;
         }
         Ok(())
@@ -311,15 +320,17 @@ impl Connection {
 
     /// Ping-pong connection verification
     pub async fn ping(&mut self) -> Result<()> {
-        let timeout = self.options().ping_timeout;
+        debug!("ping");
+        self.out.clear();
+        Ping.write(self.inner.info(), &mut self.out)?;
 
-        let (mut stream, mut sink, buf) = self.write_command(&Ping)?;
-        sink.writer.write_all(buf.as_slice()).await?;
-        buf.truncate(DEF_OUT_BUF_SIZE);
+        let mut stream = self.write_command(self.options().ping_timeout).await?;
 
-        while let Some(packet) = stream.next(timeout).await? {
+        while let Some(packet) = &mut stream.next().await? {
             match packet {
                 Response::Pong => {
+                    info!("ping ok");
+
                     return Ok(());
                 }
                 _ => {
@@ -328,6 +339,8 @@ impl Connection {
                 }
             }
         }
+
+        warn!("ping failed");
         Err(DriverError::ConnectionTimeout.into())
     }
 
@@ -335,13 +348,13 @@ impl Connection {
     /// Query should not return query result. Otherwise it will return error.
     pub async fn execute(&mut self, ddl: impl Into<Query>) -> Result<()> {
         check_pending!(self);
-        let timeout = self.options().execute_timeout;
+        self.out.clear();
+        Execute { query: ddl.into() }.write(self.inner.info(), &mut self.out)?;
 
-        let query: Query = ddl.into();
-        let (mut stream, mut sink, buf) = self.write_command(&Execute { query })?;
-        sink.writer.write_all(buf).await?;
+        let mut stream = self.write_command(self.options().execute_timeout).await?;
 
-        if let Some(packet) = stream.next(timeout).await? {
+        if let Some(packet) = stream.next().await? {
+            warn!("execute method returns packet {}", packet.code());
             return Err(DriverError::PacketOutOfOrder(packet.code()).into());
         }
 
@@ -353,24 +366,24 @@ impl Connection {
     pub async fn insert(
         &mut self,
         data: &Block<'_>,
-    ) -> Result<InsertSink<'_, ReadHalf<'_>, WriteHalf<'_>>> {
+    ) -> Result<InsertSink<'_, &mut dyn AsyncReadWrite>> {
         check_pending!(self);
 
         let query = Query::from_block(&data);
-        let timeout = self.options().execute_timeout;
+        self.out.clear();
+        Execute { query }.write(self.inner.info(), &mut self.out)?;
 
-        let (mut stream, mut sink, buf) = self.write_command(&Execute { query })?;
-        sink.writer.write_all(buf.as_slice()).await?;
-        buf.truncate(DEF_OUT_BUF_SIZE);
+        let mut stream = self.write_command(self.options().insert_timeout).await?;
 
-        // We get first block that has not rows. Columns define table structure
+        // We get first block with no rows. We can use it to define table structure.
         // Before call insert we will check input data against server table structure
         stream.skip_empty = false;
-        stream.set_pending();
-        let mut stream = if let Some(Response::Data(block)) = stream.next(timeout).await? {
-            InsertSink::new(stream, sink, block, timeout)
+        //stream.set_pending();
+        let mut stream = if let Some(Response::Data(block)) = stream.next().await? {
+            InsertSink::new(stream, block)
         } else {
             stream.set_deteriorated();
+            warn!("insert method. unknown packet received");
             return Err(DriverError::PacketOutOfOrder(0).into());
         };
 
@@ -391,51 +404,41 @@ impl Connection {
     pub async fn query(
         &mut self,
         sql: impl Into<Query>,
-    ) -> Result<QueryResult<'_, ReadHalf<'_>, WriteHalf<'_>>> {
+    ) -> Result<QueryResult<'_, &mut dyn AsyncReadWrite>> {
         check_pending!(self);
+        self.out.clear();
+        Execute { query: sql.into() }.write(self.inner.info(), &mut self.out)?;
 
-        let timeout = self.options().query_timeout;
-        let (stream, mut sink, buf) = self.write_command(&Execute { query: sql.into() })?;
-        sink.writer.write_all(buf.as_slice()).await?;
-        buf.truncate(DEF_OUT_BUF_SIZE);
+        let stream = self.write_command(self.options().query_timeout).await?;
 
-        Ok(QueryResult {
-            sink,
-            inner: stream,
-            timeout,
-        })
+        Ok(QueryResult { inner: stream })
     }
 
     /// Take inner connection. Drain itself
+    #[inline]
     pub(super) fn take(&mut self) -> Box<Inner> {
-        std::mem::replace(&mut self.inner, Box::new(Inner::default()))
+        //std::mem::replace(&mut self.inner, Box::new(Inner::default()))
+        std::mem::take(&mut self.inner)
     }
 
-    fn write_command(
+    async fn write_command(
         &mut self,
-        cmd: &dyn Command,
-    ) -> Result<(
-        ResponseStream<'_, ReadHalf<'_>>,
-        CommandSink<WriteHalf<'_>>,
-        &mut Vec<u8>, //&[u8],
-    )> {
-        // TODO: ("truncate output buffer upon completion ");
-        self.out.clear();
-
-        let (rdr, wrt, info) = if let Some((rdr, wrt, info)) = self.inner.split() {
-            (rdr, wrt, info)
+        timeout: Duration,
+    ) -> Result<ResponseStream<'_, &mut dyn AsyncReadWrite>> {
+        let (rw, info) = if let Some((rw, info)) = self.inner.split() {
+            (rw, info)
         } else {
             return Err(DriverError::ConnectionClosed.into());
         };
 
-        cmd.write(&*info, &mut self.out)?;
         info.set_pending();
 
-        Ok((
-            ResponseStream::with_capacity(8 * 1024, rdr, info),
-            CommandSink::new(wrt),
-            self.out.as_mut(), //self.out.as_ref(),
-        ))
+        let mut stream = ResponseStream::with_capacity(DEFAULT_QUERY_BUF_SIZE, rw, info, timeout);
+
+        stream.write(self.out.as_slice()).await?;
+        self.out.truncate(DEF_OUT_BUF_SIZE);
+
+        Ok(stream)
     }
 }
 
@@ -456,7 +459,7 @@ impl Drop for Connection {
             return;
         }
         if let Some(pool) = self.pool.take() {
-            pool.return_conn(conn);
+            pool.inner.return_connection(conn);
         } else {
             disconnect(conn);
         }

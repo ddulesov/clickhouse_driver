@@ -4,53 +4,9 @@ extern crate libc;
 #[macro_use]
 extern crate std;
 
-use libc::{c_char, c_int, c_uint, c_void, size_t};
+use libc::{c_char, c_int, c_uint, size_t};
 
 pub type LZ4FErrorCode = size_t;
-
-#[derive(Clone)]
-#[repr(u32)]
-pub enum BlockSize {
-    Default = 0,
-    // Default - 64KB
-    Max64KB = 4,
-    Max256KB = 5,
-    Max1MB = 6,
-    Max4MB = 7,
-}
-
-impl BlockSize {
-    pub fn get_size(&self) -> usize {
-        match *self {
-            BlockSize::Default => 64 * 1024,
-            BlockSize::Max64KB => 64 * 1024,
-            BlockSize::Max256KB => 256 * 1024,
-            BlockSize::Max1MB => 1024 * 1024,
-            BlockSize::Max4MB => 1024 * 1024,
-        }
-    }
-}
-
-#[derive(Clone)]
-#[repr(u32)]
-pub enum BlockMode {
-    Linked = 0,
-    Independent,
-}
-
-#[derive(Clone)]
-#[repr(u32)]
-pub enum ContentChecksum {
-    NoChecksum = 0,
-    ChecksumEnabled,
-}
-
-#[repr(C)]
-pub struct LZ4StreamEncode(c_void);
-
-#[repr(C)]
-pub struct LZ4StreamDecode(c_void);
-
 pub const LZ4F_VERSION: c_uint = 100;
 
 extern "C" {
@@ -102,62 +58,12 @@ extern "C" {
     // const char* LZ4F_getErrorName(LZ4F_errorCode_t code);
     pub fn LZ4F_getErrorName(code: size_t) -> *const c_char;
 
-    // LZ4F_createCompressionContext() :
-    // The first thing to do is to create a compressionContext object, which will be used in all
-    // compression operations.
-    // This is achieved using LZ4F_createCompressionContext(), which takes as argument a version
-    // and an LZ4F_preferences_t structure.
-    // The version provided MUST be LZ4F_VERSION. It is intended to track potential version
-    // differences between different binaries.
-    // The function will provide a pointer to a fully allocated LZ4F_compressionContext_t object.
-    // If the result LZ4F_errorCode_t is not zero, there was an error during context creation.
-    // Object can release its memory using LZ4F_freeCompressionContext();
-    //
-    // LZ4F_errorCode_t LZ4F_createCompressionContext(
-    //                                   LZ4F_compressionContext_t* LZ4F_compressionContextPtr,
-    //                                   unsigned version);
-
     // int LZ4_versionNumber(void)
     pub fn LZ4_versionNumber() -> c_int;
 
     // int LZ4_compressBound(int isize)
     fn LZ4_compressBound(size: c_int) -> c_int;
 
-    // LZ4_stream_t* LZ4_createStream(void)
-    pub fn LZ4_createStream() -> *mut LZ4StreamEncode;
-
-    // int LZ4_compress_continue(LZ4_stream_t* LZ4_streamPtr,
-    //                           const char* source,
-    //                           char* dest,
-    //                           int inputSize)
-    pub fn LZ4_compress_continue(
-        LZ4_stream: *mut LZ4StreamEncode,
-        source: *const u8,
-        dest: *mut u8,
-        input_size: c_int,
-    ) -> c_int;
-
-    // int LZ4_freeStream(LZ4_stream_t* LZ4_streamPtr)
-    pub fn LZ4_freeStream(LZ4_stream: *mut LZ4StreamEncode) -> c_int;
-
-    // LZ4_streamDecode_t* LZ4_createStreamDecode(void)
-    pub fn LZ4_createStreamDecode() -> *mut LZ4StreamDecode;
-
-    // int LZ4_decompress_safe_continue(LZ4_streamDecode_t* LZ4_streamDecode,
-    //                                  const char* source,
-    //                                  char* dest,
-    //                                  int compressedSize,
-    //                                  int maxDecompressedSize)
-    pub fn LZ4_decompress_safe_continue(
-        LZ4_stream: *mut LZ4StreamDecode,
-        source: *const u8,
-        dest: *mut u8,
-        compressed_size: c_int,
-        max_decompressed_size: c_int,
-    ) -> c_int;
-
-    // int LZ4_freeStreamDecode(LZ4_streamDecode_t* LZ4_stream)
-    pub fn LZ4_freeStreamDecode(LZ4_stream: *mut LZ4StreamDecode) -> c_int;
 }
 
 const LZ4_DISTANCE_MAX: usize = 65535;
@@ -209,12 +115,9 @@ pub fn LZ4_CompressBounds(src: usize) -> usize {
 #[cfg(test)]
 mod test {
     extern crate rand;
-
-    use libc::c_int;
-
-    use crate::*;
-
     use self::rand::RngCore;
+    use crate::*;
+    use libc::c_int;
 
     #[test]
     fn test_version_number() {

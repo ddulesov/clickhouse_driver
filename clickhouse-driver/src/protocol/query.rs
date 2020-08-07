@@ -95,7 +95,6 @@ impl ServerWriter for Query {
             "readonly".encode(writer)?;
             ro.encode(writer)?
         }
-
         // Empty string end up settings block
         ().encode(writer)?;
 

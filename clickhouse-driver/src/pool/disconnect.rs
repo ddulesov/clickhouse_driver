@@ -1,5 +1,5 @@
 use super::{Inner, Pool, POOL_STATUS_SERVE, POOL_STATUS_STOPPING};
-use crate::errors::Result;
+use crate::errors::{DriverError, Result};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{atomic::Ordering, Arc};
@@ -25,7 +25,7 @@ impl Future for DisconnectPool {
     fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.as_mut();
 
-        let _stop = this
+        let stop = this
             .pool_inner
             .close
             .compare_exchange_weak(
@@ -36,9 +36,13 @@ impl Future for DisconnectPool {
             )
             .is_err();
 
-        // if self.pool_inner.close.load(atomic::Ordering::Acquire) == POOL_STATUS_STOPPED {
-        //
-        // }
-        Poll::Ready(Ok(()))
+        this.pool_inner.wakers.notify_all();
+
+        // TODO: waiting for connections to close
+        if stop {
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Ready(Err(DriverError::PoolDisconnected.into()))
+        }
     }
 }

@@ -4,8 +4,9 @@ description = "CityHash binding for ClickHouse Asynchronous Driver."
 version = "0.1.0"
 authors = ["dmitry dulesov <dmitry.dulesov@gmail.com>"]
 edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+build = "build.rs"
+license = "MIT"
+repository = "https://github.com/ddulesov/clickhouse_driver"
 
 [dependencies]
 libc = "0.2"

@@ -1,26 +1,11 @@
 use chrono::{DateTime, Utc};
 use clickhouse_driver::prelude::errors;
 use clickhouse_driver::prelude::*;
-use std::convert::TryInto;
-use std::env;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use uuid::Uuid;
-
-pub fn get_pool() -> Pool {
-    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "tcp://localhost?execute_timeout=5s&query_timeout=20s&pool_max=4&compression=lz4".into()
-    });
-
-    Pool::create(database_url).expect("provide connection url in DATABASE_URL env variable")
-}
-
-pub fn get_config() -> Options {
-    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "tcp://localhost?execute_timeout=5s&query_timeout=20s&pool_max=4&compression=lz4".into()
-    });
-
-    database_url.try_into().unwrap()
-}
+mod common;
+use clickhouse_driver::prelude::types::Decimal32;
+use common::{get_config, get_pool};
 
 macro_rules! get {
     ($row:ident, $idx: expr, $msg: expr) => {
@@ -176,7 +161,7 @@ async fn test_query_lowcardinality() -> errors::Result<()> {
     let mut conn = pool.connection().await?;
 
     let mut query_result = conn
-        .query("SELECT lcs FROM main WHERE lcs='May' LIMIT 1000")
+        .query("SELECT lcs FROM mainx WHERE lcs='May' LIMIT 1000")
         .await?;
 
     while let Some(block) = query_result.next().await? {
@@ -186,7 +171,47 @@ async fn test_query_lowcardinality() -> errors::Result<()> {
         }
     }
     drop(query_result);
+    let mut query_result = conn
+        .query("SELECT lcs FROM mainx WHERE lcs IS NULL LIMIT 1000")
+        .await?;
 
+    while let Some(block) = query_result.next().await? {
+        for row in block.iter_rows() {
+            let lcs: Option<&str> = row.value(0)?;
+            assert!(lcs.is_none());
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_query_array() -> errors::Result<()> {
+    let pool = get_pool();
+    let mut conn = pool.connection().await?;
+
+    let mut query_result = conn
+        .query("SELECT a8,a16,a32,a64,ad,adt,adc,aip4,aip6 FROM mainx LIMIT 100 ")
+        .await?;
+
+    while let Some(block) = query_result.next().await? {
+        for row in block.iter_rows() {
+            let a8: &[u8] = get!(row, 0);
+            let a16: &[u16] = get!(row, 1);
+            let a32: &[u32] = get!(row, 2);
+            let a64: &[u64] = get!(row, 3);
+            let ad: Vec<chrono::Date<Utc>> = get!(row, 4);
+            let adt: Vec<chrono::DateTime<Utc>> = get!(row, 5);
+            let adc: Vec<Decimal32> = get!(row, 6);
+            let aip4: Vec<Ipv4Addr> = get!(row, 7);
+            let aip6: Vec<Ipv6Addr> = get!(row, 8);
+
+            println!(
+                "{:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?}",
+                a8, a16, a32, a64, ad, adt, adc, aip4, aip6
+            );
+        }
+    }
     Ok(())
 }
 

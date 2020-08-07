@@ -1,17 +1,11 @@
 use clickhouse_driver::prelude::errors;
 use clickhouse_driver::prelude::types::{Decimal32, Decimal64};
 use clickhouse_driver::prelude::*;
-use std::env;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use uuid::Uuid;
 
-pub fn get_pool() -> Pool {
-    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "tcp://localhost?execute_timeout=5s&query_timeout=20s&pool_max=4&compression=lz4".into()
-    });
-
-    Pool::create(database_url).expect("provide connection url in DATABASE_URL env variable")
-}
+mod common;
+use common::get_pool;
 
 macro_rules! get {
     ($row:ident, $idx: expr, $msg: expr) => {

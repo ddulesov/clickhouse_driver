@@ -9,9 +9,11 @@ use tokio::sync;
 use crate::{
     client::InnerConection,
     errors::{Result, UrlError},
+    sync::WakerSet,
 };
 
 use super::{CompressionMethod, Inner, Options, Pool, POOL_STATUS_SERVE};
+use parking_lot::Mutex;
 
 /// Connection pool builder
 ///
@@ -147,12 +149,12 @@ impl PoolBuilder {
         let hosts = options.take_addr();
 
         let inner = Arc::new(Inner {
-            new: crossbeam::queue::ArrayQueue::new(options.pool_max as usize),
+            new: crossbeam::queue::ArrayQueue::new(options.pool_min as usize),
             options,
-            notifyer: sync::Notify::new(),
+            wakers: WakerSet::new(),
+            lock: Mutex::new(0),
             connections_num: atomic::AtomicUsize::new(0),
-            issued: atomic::AtomicUsize::new(0),
-            wait: atomic::AtomicUsize::new(0),
+            //wait: atomic::AtomicUsize::new(0),
             #[cfg(feature = "recycle")]
             recycler: Some(rx),
             hosts,

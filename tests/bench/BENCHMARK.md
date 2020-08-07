@@ -12,7 +12,7 @@
   - go (https://github.com/ClickHouse/clickhouse-go)        | 1.4.1
   - python (https://github.com/mymarilyn/clickhouse-driver) | 0.1.4
   - clickhouse_rs                                           | 0.2.0-alpha.5
-  - clickhouse-driver                                       | 0.1.0-alpha.2 (*DRIVER*)
+  - clickhouse-driver(3468745c3d8a2fbf5182a8d844f1d122f90a6d20)| 0.1.0-alpha.2 (*DRIVER*)
 
 
 java -Xms256m -Xmx1024m -jar ./clickhouse_driver-1.0-SNAPSHOT.jar -- select
@@ -22,11 +22,11 @@ java -Xms256m -Xmx1024m -jar ./clickhouse_driver-1.0-SNAPSHOT.jar -- select
 
 | python   | java-native | go       | clickhouse-rs | *DRIVER*  |  
 | --------:|------------:| --------:| -------------:|----------:|
-|  OMK     | 2900        | 9234     | 3776          | 2908      |
-|  Killed  | 2900        | 9119     | 3603          | 3033      |
-|          | 2888        | 9032     | 3681          | 2904      |
-|          | 2921        | 9658     | 3666          | 3143      |
-|          | **2902**    | **9260** | **3681**      |**2997**   |
+|  OMK     | 2900        | 9234     | 3776          | 2833      |
+|  Killed  | 2900        | 9119     | 3603          | 2821      |
+|          | 2888        | 9032     | 3681          | 2847      |
+|          | 2921        | 9658     | 3666          | 2867      |
+|          | **2902**    | **9260** | **3681**      |**2842**   |
 
 ## result of INSERT benchmark, 1000 blocks x 10000 rows of (id UInt64, name String, dt DateTime) 
  milliseconds  
