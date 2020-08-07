@@ -9,6 +9,7 @@ edition = "2018"
 keywords = ["tokio", "database", "clickhouse"]
 categories = ["database"]
 repository = "https://github.com/ddulesov/clickhouse_driver"
+repository = "https://github.com/ddulesov/clickhouse_driver"
 
 [dependencies]
 clickhouse-driver-cth = { version="0.1.0", path="../cityhash", optional=true}
