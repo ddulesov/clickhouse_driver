@@ -81,7 +81,7 @@ async fn test_ping() -> errors::Result<()> {
 
     let pool = Pool::create(config).unwrap();
     let mut conn = pool.connection().await?;
-    let err_timeout = conn.ping().await;
+    let _err_timeout = conn.ping().await;
 
     // assert!(err_timeout.unwrap_err().is_timeout());
 
