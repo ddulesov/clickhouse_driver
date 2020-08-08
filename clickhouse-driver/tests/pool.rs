@@ -85,6 +85,15 @@ async fn test_ping() -> errors::Result<()> {
 
     // assert!(err_timeout.unwrap_err().is_timeout());
 
+
+    let config = get_config().set_timeout(Duration::from_nanos(1));
+
+    let pool = Pool::create(config).unwrap();
+    let mut conn = pool.connection().await?;
+    let _err_timeout = conn.ping().await;
+
+    // assert!(err_timeout.unwrap_err().is_timeout());
+
     Ok(())
 }
 

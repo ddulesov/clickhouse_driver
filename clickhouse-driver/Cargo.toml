@@ -5,11 +5,9 @@ version = "0.1.0-alpha.3"
 license = "MIT"
 authors = ["dmitry dulesov <dmitry.dulesov@gmail.com>"]
 homepage = "https://github.com/ddulesov/clickhouse_driver"
-readme = "README.md"
 edition = "2018"
 keywords = ["tokio", "database", "clickhouse"]
 categories = ["database"]
-exclude = ["tests/*", "examples/*"]
 repository = "https://github.com/ddulesov/clickhouse_driver"
 
 [dependencies]
@@ -24,7 +22,6 @@ tokio = { version = "0.2", features = ["rt-core", "sync", "tcp", "time", "dns", 
 tokio-native-tls = { version = "0.1.0", optional= true }
 pin-project-lite = { version="^0.1" }
 futures = { version="0.3" }
-native-tls = { version = "*", optional = true }
 hostname = { version="^0.3" }
 chrono = { version="^0.4" }
 chrono-tz = { version="^0.5" }
