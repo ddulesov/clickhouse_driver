@@ -356,7 +356,7 @@ impl Connection {
 
         let mut stream = self.write_command(self.options().execute_timeout).await?;
 
-        if let Some(packet) = stream.next().await? {
+        while let Some(packet) = stream.next().await? {
             if packet.code() != SERVER_PROGRESS {
                 warn!("execute method returns packet {}", packet.code());
                 return Err(DriverError::PacketOutOfOrder(packet.code()).into());
