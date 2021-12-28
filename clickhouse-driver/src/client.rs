@@ -3,6 +3,7 @@ use std::io;
 use std::time::Duration;
 
 use crate::protocol::block::{Block, ServerBlock};
+use crate::protocol::code::SERVER_PROGRESS;
 use crate::protocol::command::{CommandSink, ResponseStream};
 use crate::protocol::insert::InsertSink;
 use crate::protocol::packet::Progress;
@@ -356,8 +357,10 @@ impl Connection {
         let mut stream = self.write_command(self.options().execute_timeout).await?;
 
         if let Some(packet) = stream.next().await? {
-            warn!("execute method returns packet {}", packet.code());
-            return Err(DriverError::PacketOutOfOrder(packet.code()).into());
+            if packet.code() != SERVER_PROGRESS {
+                warn!("execute method returns packet {}", packet.code());
+                return Err(DriverError::PacketOutOfOrder(packet.code()).into());
+            }
         }
 
         Ok(())
@@ -381,16 +384,25 @@ impl Connection {
         // Before call insert we will check input data against server table structure
         stream.skip_empty = false;
         //stream.set_pending();
-        let mut stream = if let Some(Response::Data(block)) = stream.next().await? {
-            InsertSink::new(stream, block)
-        } else {
-            stream.set_deteriorated();
-            warn!("insert method. unknown packet received");
-            return Err(DriverError::PacketOutOfOrder(0).into());
-        };
 
-        stream.next(&data).await?;
-        Ok(stream)
+        while let Some(packet) = stream.next().await? {
+            match packet {
+                Response::Progress(_) => {
+                    continue;
+                }
+                Response::Data(block) => {
+                    let mut st = InsertSink::new(stream, block);
+                    st.next(&data).await?;
+                    return Ok(st);
+                }
+                _ => {
+                    stream.set_deteriorated();
+                    warn!("insert method. unknown packet received");
+                    return Err(DriverError::PacketOutOfOrder(0).into());
+                }
+            }
+        }
+        unreachable!()
     }
     /// Execute SELECT statement returning sequence of ServerBlocks.
     ///
