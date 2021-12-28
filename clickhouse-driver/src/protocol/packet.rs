@@ -100,9 +100,9 @@ impl std::fmt::Debug for ProfileInfo {
 
 #[derive(Copy, Clone, Default, PartialEq)]
 pub struct Progress {
-    rows: u64,
-    bytes: u64,
-    total: u64,
+    pub rows: u64,
+    pub bytes: u64,
+    pub total: u64,
 }
 
 impl Progress {
