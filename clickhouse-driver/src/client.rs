@@ -5,6 +5,7 @@ use std::time::Duration;
 use crate::protocol::block::{Block, ServerBlock};
 use crate::protocol::command::{CommandSink, ResponseStream};
 use crate::protocol::insert::InsertSink;
+use crate::protocol::packet::Progress;
 use crate::protocol::packet::Response;
 use crate::protocol::packet::{Execute, Hello, Ping};
 use crate::protocol::query::Query;
@@ -69,6 +70,7 @@ pub(super) type InnerConection = Inner;
 
 pub struct QueryResult<'a, R: AsyncRead> {
     pub(crate) inner: ResponseStream<'a, R>,
+    pub progress: Progress,
 }
 
 impl<'a, R: AsyncWrite + AsyncRead + Unpin + Send> QueryResult<'a, R> {
@@ -82,8 +84,8 @@ impl<'a, R: AsyncRead + Unpin + Send> QueryResult<'a, R> {
         while let Some(packet) = self.inner.next().await? {
             if let Response::Data(block) = packet {
                 return Ok(Some(block));
-            } else {
-                //println!("packet {:?}", packet);
+            } else if let Response::Progress(progress) = packet {
+                self.progress.update(progress);
             }
         }
         Ok(None)
@@ -411,7 +413,10 @@ impl Connection {
 
         let stream = self.write_command(self.options().query_timeout).await?;
 
-        Ok(QueryResult { inner: stream })
+        Ok(QueryResult {
+            inner: stream,
+            progress: Progress::default(),
+        })
     }
 
     /// Take inner connection. Drain itself

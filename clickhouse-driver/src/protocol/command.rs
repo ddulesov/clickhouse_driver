@@ -9,7 +9,7 @@ use tokio::time;
 use super::block::{BlockColumn, BlockColumnHeader, BlockInfo, ServerBlock};
 use super::code::*;
 use super::column::{AsInColumn, EnumColumn, FixedColumn, StringColumn};
-use super::packet::{ProfileInfo, Response};
+use super::packet::{ProfileInfo, Progress, Response};
 use super::value::{ValueDate, ValueDateTime, ValueDateTime64, ValueIp4, ValueIp6, ValueUuid};
 use super::ServerInfo;
 use crate::compression::LZ4ReadAdapter;
@@ -198,8 +198,8 @@ impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
                 }
                 SERVER_PROGRESS => {
                     let revision = self.info.revision;
-                    let (_rows, _bytes, _total) =
-                        read_progress(self.reader.inner_ref(), revision).await?;
+                    let progress = read_progress(self.reader.inner_ref(), revision).await?;
+                    return Ok(Some(Response::Progress(progress)));
                 }
                 code => {
                     self.set_fuse();
@@ -595,7 +595,7 @@ where
     Ok(Response::Hello(name, major, minor, revision, timezone))
 }
 
-async fn read_progress<R>(reader: R, revision: u32) -> Result<(u64, u64, u64)>
+async fn read_progress<R>(reader: R, revision: u32) -> Result<Progress>
 where
     R: AsyncBufRead + Unpin,
 {
@@ -609,7 +609,7 @@ where
     } else {
         0
     };
-    Ok((rows, bytes, total))
+    Ok(Progress::new(rows, bytes, total))
 }
 
 async fn read_profile<R>(reader: R) -> Result<ProfileInfo>

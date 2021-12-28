@@ -64,6 +64,7 @@ async fn main() -> Result<(), io::Error> {
             }
         }
         eprintln!("fetch {} rows  in {} msec", c, start.elapsed().as_millis());
+        eprintln!("progress {:?}", result.progress);
     }
 
     Ok(())
