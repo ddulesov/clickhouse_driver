@@ -4,8 +4,6 @@ extern crate quote;
 extern crate syn;
 
 use proc_macro::TokenStream;
-
-use syn::export::TokenStream2;
 use syn::{parse_macro_input, DeriveInput};
 
 #[proc_macro_derive(IsCommand)]
@@ -15,7 +13,7 @@ pub fn command_derive(input: TokenStream) -> TokenStream {
     gen.into()
 }
 
-fn command_impl(ast: &syn::DeriveInput) -> TokenStream2 {
+fn command_impl(ast: &syn::DeriveInput) -> proc_macro2::TokenStream {
     let gen = &ast.generics;
     let name = &ast.ident;
     quote! {

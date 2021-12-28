@@ -5,7 +5,6 @@
 //! add next lines in dependencies section of `Cargo.toml`
 //!  ```toml
 //!   clickhouse-driver = { version="0.1.0-alpha.1", path="../path_to_package/clickhouse-driver"}
-//!   clickhouse-driver-lz4 = { version="0.1.0", path="../path_to_package/lz4a"}
 //!   clickhouse-driver-cthrs = { version="0.1.0", path="../path_to_package/cityhash-rs"}
 //!   ```
 //! ## Supported Clickhouse data types

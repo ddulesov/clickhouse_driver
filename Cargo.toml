@@ -1,7 +1,7 @@
 [workspace]
 
 members = [
-    "clickhouse-driver","cityhash","lz4a","derive","cityhash-rs"
+    "clickhouse-driver","cityhash","derive","cityhash-rs"
 ]
 
 [profile.release]

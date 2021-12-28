@@ -3,7 +3,7 @@ use core::marker::PhantomData;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt, ReadBuf};
 
 /// Read string data encoded as VarInt(length) + bytearray
 pub(crate) struct ReadVString<'a, T: FromBytes, R> {
@@ -53,10 +53,9 @@ impl<'a, T: FromBytes, R: AsyncRead> ReadVString<'a, T, R> {
             if self.length_ == self.data.len() {
                 return FromBytes::from_bytes(&mut self.data).into();
             } else {
-                self.length_ += ready!(self
-                    .inner
-                    .as_mut()
-                    .poll_read(cx, &mut self.data[self.length_..])?);
+                let mut buffer = ReadBuf::new(self.data[self.length_..].as_mut());
+                ready!(self.inner.as_mut().poll_read(cx, &mut buffer)?);
+                self.length_ += buffer.filled().len();
             }
         }
     }
@@ -91,7 +90,10 @@ impl<'a, R: AsyncRead> ReadVInt<'a, R> {
         let mut b = [0u8; 1];
         loop {
             //let inner: Pin<&mut R> =  unsafe{ Pin::new_unchecked(self.inner) };
-            if 0 == ready!(self.inner.as_mut().poll_read(cx, &mut b)?) {
+            let mut buffer = ReadBuf::new(&mut b);
+            ready!(self.inner.as_mut().poll_read(cx, &mut buffer)?);
+
+            if buffer.filled().len() == 0 {
                 return Poll::Ready(Err(DriverError::BrokenData.into()));
             }
             let b = b[0];
