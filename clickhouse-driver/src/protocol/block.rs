@@ -222,6 +222,7 @@ impl std::fmt::Debug for BlockColumn {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct ServerBlock {
     pub(crate) columns: Vec<BlockColumn>,

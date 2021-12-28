@@ -1,6 +1,5 @@
 use std::fmt;
 use std::io;
-use std::net::Shutdown;
 use std::time::Duration;
 
 use crate::protocol::block::{Block, ServerBlock};
@@ -198,8 +197,8 @@ impl Inner {
     }
 
     #[inline]
-    fn setup_stream(socket: &TcpStream, options: &Options) -> io::Result<()> {
-        // TODO
+    fn setup_stream(socket: &TcpStream, _options: &Options) -> io::Result<()> {
+        // TODO set keepalive
         // socket.set_keepalive(options.keepalive)?;
         socket.set_nodelay(true)
     }

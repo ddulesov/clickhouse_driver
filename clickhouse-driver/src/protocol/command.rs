@@ -641,7 +641,6 @@ mod test {
     use crate::errors::Result;
     use crate::protocol::encoder::Encoder;
     use bytes::Buf;
-    use bytes::BufMut;
     use std::cmp;
     use std::io;
     use std::mem::size_of_val;
