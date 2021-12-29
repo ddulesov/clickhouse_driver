@@ -138,11 +138,13 @@ impl Inner {
     }
 
     /// Split self into Stream and ServerInfo
+    #[allow(clippy::manual_map)]
     #[inline]
     pub(super) fn split(&mut self) -> Option<(&mut (dyn AsyncReadWrite + '_), &mut ServerInfo)> {
         let info = &mut self.info as *mut ServerInfo;
         // SAFETY: This can be risky if caller use returned values inside Connection
         // or InnerConnection methods. Never do it.
+
         match self.socket {
             None => None,
             Some(ref mut socket) => unsafe { Some((socket, &mut *info)) },
@@ -152,7 +154,7 @@ impl Inner {
     /// Establish a connection to a Clickhouse server
     pub(super) async fn init(options: &Options, addr: &str) -> Result<Box<Inner>> {
         let socket = TcpStream::connect(addr).await?;
-        Inner::setup_stream(&socket, &options)?;
+        Inner::setup_stream(&socket, options)?;
         info!(
             "connection  established to: {}",
             socket.peer_addr().unwrap()
@@ -374,7 +376,7 @@ impl Connection {
     ) -> Result<InsertSink<'_, &mut dyn AsyncReadWrite>> {
         check_pending!(self);
 
-        let query = Query::from_block(&data);
+        let query = Query::from_block(data);
         self.out.clear();
         Execute { query }.write(self.inner.info(), &mut self.out)?;
 
@@ -392,7 +394,7 @@ impl Connection {
                 }
                 Response::Data(block) => {
                     let mut st = InsertSink::new(stream, block);
-                    st.next(&data).await?;
+                    st.next(data).await?;
                     return Ok(st);
                 }
                 _ => {

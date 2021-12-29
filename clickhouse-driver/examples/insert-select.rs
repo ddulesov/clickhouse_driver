@@ -44,7 +44,7 @@ impl Deserialize for Blob {
         })
     }
 }
-const C: u64 = 10000;
+const C: u64 = 100;
 
 #[tokio::main]
 async fn main() -> Result<(), io::Error> {

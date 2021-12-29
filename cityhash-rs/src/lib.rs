@@ -298,7 +298,6 @@ pub fn city_hash_128(src: &[u8]) -> Pair {
 mod tests {
     use super::*;
     use clickhouse_driver_cth::{_CityHash128, _CityMurmur, c_char, Hash128};
-    use std::vec::Vec;
 
     fn city_hash_ref(source: &[u8]) -> Pair {
         let h = unsafe { _CityHash128(source.as_ptr() as *const c_char, source.len()) };
@@ -392,14 +391,11 @@ mod tests {
 
     #[test]
     fn test_hash_128() {
-        const MAX_SIZE: u32 = 1024 * 10;
+        const MAX_SIZE: u32 = 1024;
         const ITER_COUNT: u8 = 5;
         use rand::Rng;
         for s in 8..MAX_SIZE {
-            let mut b: Vec<u8> = Vec::with_capacity(s as usize);
-            unsafe {
-                b.set_len(s as usize);
-            }
+            let mut b = std::vec![0u8; s as usize];
             for _ in 0..ITER_COUNT {
                 rand::thread_rng().fill(&mut b[..]);
                 assert_eq!(city_hash_ref(b.as_ref()), city_hash_128(b.as_ref()));

@@ -9,7 +9,7 @@ static NAMES: [&str; 5] = ["one", "two", "three", "four", "five"];
 /// Block size
 const BSIZE: u64 = 10000;
 /// The number of blocks
-const CIRCLE: u64 = 1000;
+const CIRCLE: u64 = 10;
 
 fn next_block(i: u64) -> Block<'static> {
     let now = chrono::offset::Utc::now();

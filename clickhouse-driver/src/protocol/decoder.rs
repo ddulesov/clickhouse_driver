@@ -34,11 +34,8 @@ impl FromBytes for Vec<u8> {
 
 impl<'a, T: FromBytes, R: AsyncRead> ReadVString<'a, T, R> {
     pub(crate) fn new(reader: &'a mut R, length: usize) -> ReadVString<'a, T, R> {
-        let data = unsafe {
-            let mut v = Vec::with_capacity(length);
-            v.set_len(length);
-            v
-        };
+        let data = vec![0u8; length];
+
         let inner = unsafe { Pin::new_unchecked(reader) };
         ReadVString {
             length_: 0,
@@ -93,7 +90,7 @@ impl<'a, R: AsyncRead> ReadVInt<'a, R> {
             let mut buffer = ReadBuf::new(&mut b);
             ready!(self.inner.as_mut().poll_read(cx, &mut buffer)?);
 
-            if buffer.filled().len() == 0 {
+            if buffer.filled().is_empty() {
                 return Poll::Ready(Err(DriverError::BrokenData.into()));
             }
             let b = b[0];

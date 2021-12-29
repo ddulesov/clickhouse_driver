@@ -260,10 +260,7 @@ pub(crate) async fn load_nulls<R: AsyncBufRead + Unpin>(
     mut reader: R,
     rows: u64,
 ) -> Result<Vec<u8>> {
-    let mut nulls: Vec<u8> = Vec::with_capacity(rows as usize);
-    unsafe {
-        nulls.set_len(rows as usize);
-    };
+    let mut nulls = vec![0u8; rows as usize];
     reader.read_exact(nulls.as_mut_slice()).await?;
 
     Ok(nulls)
@@ -640,13 +637,11 @@ mod test {
     use super::*;
     use crate::errors::Result;
     use crate::protocol::encoder::Encoder;
-    use bytes::Buf;
     use std::cmp;
     use std::io;
     use std::mem::size_of_val;
     use std::pin::Pin;
     use std::task::{Context, Poll};
-    use tokio::io::AsyncBufReadExt;
     use tokio::io::AsyncRead;
     use tokio::io::ReadBuf;
 
@@ -690,7 +685,7 @@ mod test {
                     return Poll::Pending;
                 }
             }
-            let _ = io::Read::read(&mut me.buf, &mut buf.initialize_unfilled_to(size))?;
+            let _ = io::Read::read(&mut me.buf, buf.initialize_unfilled_to(size))?;
             buf.advance(size);
 
             Poll::Ready(Ok(()))

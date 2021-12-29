@@ -39,10 +39,8 @@ where
 {
     fn flush(&mut self) -> std::result::Result<(), io::Error> {
         let bufsize = unsafe { LZ4_compressBound(self.buf.len() as i32) as usize };
-        let mut compressed: Vec<u8> = Vec::with_capacity(9 + bufsize);
-        unsafe {
-            compressed.set_len(9 + bufsize);
-        }
+
+        let mut compressed = vec![0u8; 9 + bufsize];
 
         let bufsize = unsafe {
             LZ4_compress_default(
@@ -96,6 +94,7 @@ where
     }
 }
 
+#[derive(Debug)]
 enum CompressionState {
     /// Read first 16 byte containing hash sum of the block +9 bytes of header
     Hash,
@@ -153,10 +152,9 @@ fn decompress(buf: &[u8], raw_size: usize) -> io::Result<Vec<u8>> {
     };
 
     // TODO: decompression in-place
-    let mut orig: Vec<u8> = Vec::with_capacity(raw_size);
-    unsafe {
-        orig.set_len(raw_size);
+    let orig = vec![0u8; raw_size];
 
+    unsafe {
         let res = {
             LZ4_decompress_safe(
                 (buf.as_ptr() as *const c_char).add(16 + 9),
@@ -191,10 +189,7 @@ pub(crate) struct LZ4ReadAdapter<R: AsyncBufRead + ?Sized> {
 
 impl<R: AsyncBufRead + Unpin + Send> LZ4ReadAdapter<R> {
     pub(crate) fn new(reader: R) -> LZ4ReadAdapter<R> {
-        let mut data = Vec::with_capacity(16 + 9);
-        unsafe {
-            data.set_len(16 + 9);
-        }
+        let data = vec![0; 16 + 9];
         LZ4ReadAdapter {
             data,
             state: CompressionState::Hash,
@@ -288,10 +283,7 @@ impl<R: AsyncBufRead + Unpin + Send> LZ4ReadAdapter<R> {
                             return Poll::Ready(Ok(self.data.as_slice()));
                         } else {
                             // Read block by chunks. First read buffered data
-                            self.data.reserve((comp_size - 9) as usize);
-                            unsafe {
-                                self.data.set_len(16 + comp_size as usize);
-                            }
+                            self.data.resize(16 + comp_size as usize, 0);
                             debug_assert!(self.data.capacity() >= (comp_size + 16));
                             debug_assert!(self.data.len() == (comp_size + 16));
 
@@ -321,10 +313,7 @@ impl<R: AsyncBufRead + Unpin + Send> LZ4ReadAdapter<R> {
                         self.raw_size = raw_size as usize;
                         let comp_size = comp_size as usize;
 
-                        self.data.reserve((comp_size - 9) as usize);
-                        unsafe {
-                            self.data.set_len(16 + comp_size as usize);
-                        }
+                        self.data.resize((16 + comp_size) as usize, 0);
                         //self.p = 9 + 16;
                         // Read the rest of LZ4 block without double buffering right from TCP socket
                         self.state = CompressionState::Compressed;

@@ -9,10 +9,10 @@ use std::{env, io, time};
 
 macro_rules! get {
     ($row: ident, $i: expr, $err: ident) => {
-        $row.value($i)?.ok_or_else($err)?;
+        $row.value($i)?.ok_or_else($err)?
     };
     ($row: ident, $i: expr, $err: ident, opt) => {
-        $row.value($i)?;
+        $row.value($i)?
     };
 }
 // CREATE table mainx(

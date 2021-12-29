@@ -507,7 +507,7 @@ pub(crate) struct EnumColumn<T> {
 }
 
 /// T can be 'u8'(Enum8) or 'u16'(Enum16)
-impl<T: Send> EnumColumn<T> {
+impl<T: Send + Default + Clone> EnumColumn<T> {
     /// Read server stream as a sequence of u8(u16) bytes
     /// and store them in internal buffer
     pub(crate) async fn load_column<R: AsyncBufRead + Unpin>(
@@ -517,9 +517,8 @@ impl<T: Send> EnumColumn<T> {
     ) -> Result<EnumColumn<T>> {
         debug_assert!(field.get_meta().is_some());
 
-        let mut data: Vec<T> = Vec::with_capacity(rows as usize);
+        let mut data: Vec<T> = vec![T::default(); rows as usize];
         unsafe {
-            data.set_len(rows as usize);
             reader.read_exact(as_bytes_bufer_mut(&mut data)).await?;
         }
         Ok(EnumColumn { data })
@@ -635,10 +634,7 @@ impl FixedColumn<BoxString> {
         let mut data: Vec<BoxString> = Vec::with_capacity(rows as usize);
 
         for _ in 0..rows {
-            let mut s: Vec<u8> = Vec::with_capacity(width as usize);
-            unsafe {
-                s.set_len(width as usize);
-            }
+            let mut s = vec![0; width as usize];
             reader.read_exact(s.as_mut_slice()).await?;
             data.push(s.into_boxed_slice());
         }
@@ -658,16 +654,15 @@ impl FixedColumn<BoxString> {
 //     }
 // }
 
-impl<T: Sized> FixedColumn<T> {
+impl<T: Sized + Default + Clone> FixedColumn<T> {
     /// Load Column of integer data types from the socket buffer
     pub(crate) async fn load_column<R: AsyncBufRead + Unpin>(
         mut reader: R,
         rows: u64,
     ) -> Result<FixedColumn<T>> {
-        let mut data: Vec<T> = Vec::with_capacity(rows as usize);
+        let mut data: Vec<T> = vec![T::default(); rows as usize];
 
         unsafe {
-            data.set_len(rows as usize);
             // Big-endian? Never heard
             reader.read_exact(as_bytes_bufer_mut(&mut data)).await?;
         }
@@ -705,7 +700,7 @@ where
     /// Wrap the Column in FixedNullColumn adapter if nulls array is provided.
     /// Return the unchanged Column if nulls is not provided.
     #[inline]
-    pub(crate) fn set_nulls(self: Self, nulls: Option<Vec<u8>>) -> Box<dyn AsInColumn> {
+    pub(crate) fn set_nulls(self, nulls: Option<Vec<u8>>) -> Box<dyn AsInColumn> {
         if let Some(nulls) = nulls {
             Box::new(FixedNullColumn { inner: self, nulls })
         } else {
@@ -804,7 +799,7 @@ pub(crate) struct FixedArrayColumn<T> {
     index: Vec<u64>,
 }
 
-impl<T: Send + IntoArray + 'static> FixedArrayColumn<T> {
+impl<T: Send + Clone + Default + IntoArray + 'static> FixedArrayColumn<T> {
     pub(crate) async fn load_column<R>(mut reader: R, rows: u64) -> Result<Box<dyn AsInColumn>>
     where
         R: AsyncBufRead + Unpin,
@@ -879,7 +874,7 @@ pub(crate) struct LowCardinalityColumn<T: Sized + Send> {
 // the number or keys sending in one block.
 impl<T> LowCardinalityColumn<T>
 where
-    T: Sized + Ord + Copy + Send + Into<u64> + 'static,
+    T: Default + Clone + Sized + Ord + Copy + Send + Into<u64> + 'static,
 {
     pub(crate) async fn load_column<R>(
         reader: R,

@@ -19,7 +19,7 @@ macro_rules! bits {
             }
             #[allow(unused_comparisons)]
             fn fit(precision: u8) -> bool {
-                precision <= $max && precision >= $min
+                ($min..=$max).contains(&precision)
             }
         }
     };
@@ -177,8 +177,8 @@ mod test {
     #[test]
     fn test_decimal_range() {
         assert_eq!(i32::fit(8), true);
-        assert_ne!(i32::fit(10), true);
-        assert_ne!(i64::fit(6), true);
+        assert_eq!(i32::fit(10), false);
+        assert_eq!(i64::fit(6), false);
         assert_eq!(i64::fit(14), true);
     }
 
