@@ -5,7 +5,6 @@
 //! add next lines in dependencies section of `Cargo.toml`
 //!  ```toml
 //!   clickhouse-driver = { version="0.1.0-alpha.1", path="../path_to_package/clickhouse-driver"}
-//!   clickhouse-driver-lz4 = { version="0.1.0", path="../path_to_package/lz4a"}
 //!   clickhouse-driver-cthrs = { version="0.1.0", path="../path_to_package/cityhash-rs"}
 //!   ```
 //! ## Supported Clickhouse data types
@@ -34,7 +33,7 @@
 //! - default database: "default"
 //!
 #![recursion_limit = "128"]
-#![allow(clippy::unknown_clippy_lints)]
+#![allow(unknown_lints)]
 extern crate byteorder;
 extern crate chrono;
 extern crate chrono_tz;

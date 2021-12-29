@@ -98,15 +98,34 @@ impl std::fmt::Debug for ProfileInfo {
     }
 }
 
-pub struct Statistics {
-    rows: u64,
-    bytes: u64,
-    total: u64,
+#[derive(Copy, Clone, Default, PartialEq)]
+pub struct Progress {
+    pub rows: u64,
+    pub bytes: u64,
+    pub total: u64,
 }
 
-impl std::fmt::Debug for Statistics {
+impl Progress {
+    pub fn new(rows: u64, bytes: u64, total: u64) -> Self {
+        Progress { rows, bytes, total }
+    }
+
+    pub fn update(&mut self, progress: Progress) {
+        self.rows += progress.rows;
+        self.bytes += progress.bytes;
+        self.total += progress.total;
+    }
+
+    pub fn reset(&mut self) {
+        self.rows = 0;
+        self.bytes = 0;
+        self.total = 0;
+    }
+}
+
+impl std::fmt::Debug for Progress {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Statistics")
+        f.debug_struct("Progress")
             .field("rows", &self.rows)
             .field("bytes", &self.bytes)
             .field("total", &self.total)
@@ -119,10 +138,11 @@ pub(crate) enum Response {
     Pong,
     Data(ServerBlock),
     Hello(String, u64, u64, u64, Tz),
+    Progress(Progress),
     // Eos,
     // Profile(u64, u64, u64, u8, u8),
     // Totals,
-    // Extremes,
+    // Extremes
 }
 
 impl Response {
@@ -131,6 +151,7 @@ impl Response {
             Response::Pong => SERVER_PONG,
             Response::Data(_) => SERVER_DATA,
             Response::Hello(..) => SERVER_HELLO,
+            Response::Progress(..) => SERVER_PROGRESS,
             // Response::Eos => SERVER_END_OF_STREAM,
             // Response::Extremes => SERVER_EXTREMES,
             // Response::Totals => SERVER_TOTALS,

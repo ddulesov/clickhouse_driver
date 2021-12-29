@@ -235,7 +235,10 @@ where
     }
 
     fn is_compatible(&self, field: &Field) -> bool {
-        matches!(field.sql_type, SqlType::String | SqlType::FixedString(_) | SqlType::Enum8 | SqlType::Enum16)
+        matches!(
+            field.sql_type,
+            SqlType::String | SqlType::FixedString(_) | SqlType::Enum8 | SqlType::Enum16
+        )
     }
 }
 /// IPv4 output column
@@ -513,6 +516,7 @@ impl_intocolumn_simple!(Option<Decimal128>, |f| {
 #[derive(Copy, Clone, Debug)]
 pub struct ValueIp4([u8; 4]);
 
+#[allow(clippy::from_over_into)]
 impl Into<Ipv4Addr> for ValueIp4 {
     fn into(mut self) -> Ipv4Addr {
         self.0.reverse();
@@ -523,6 +527,7 @@ impl Into<Ipv4Addr> for ValueIp4 {
 #[derive(Copy, Clone, Debug)]
 pub struct ValueIp6([u8; 16]);
 
+#[allow(clippy::from_over_into)]
 impl Into<Ipv6Addr> for ValueIp6 {
     fn into(mut self) -> Ipv6Addr {
         self.0.reverse();
@@ -544,7 +549,7 @@ impl Into<Uuid> for ValueUuid {
 #[derive(Copy, Clone, Debug)]
 pub struct ValueDate(pub [u8; 2]);
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 pub struct ValueDateTime(pub [u8; 4]);
 
 #[derive(Copy, Clone, Debug)]
@@ -561,6 +566,7 @@ pub struct ValueDecimal64(pub i64);
 pub struct ValueDecimal128(pub i128);
 
 impl ValueDate {
+    #[allow(clippy::wrong_self_convention)]
     pub(super) fn to_date(&self) -> chrono::Date<chrono::offset::Utc> {
         ValueDate::date_inner(i16::from_le_bytes(self.0))
     }
@@ -573,6 +579,7 @@ impl ValueDate {
 }
 
 impl ValueDateTime {
+    #[allow(clippy::wrong_self_convention)]
     pub(super) fn to_datetime(&self) -> DateTime<chrono::offset::Utc> {
         ValueDateTime::datetime_inner(i32::from_le_bytes(self.0))
     }

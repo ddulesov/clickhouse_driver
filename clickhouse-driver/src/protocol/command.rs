@@ -9,7 +9,7 @@ use tokio::time;
 use super::block::{BlockColumn, BlockColumnHeader, BlockInfo, ServerBlock};
 use super::code::*;
 use super::column::{AsInColumn, EnumColumn, FixedColumn, StringColumn};
-use super::packet::{ProfileInfo, Response};
+use super::packet::{ProfileInfo, Progress, Response};
 use super::value::{ValueDate, ValueDateTime, ValueDateTime64, ValueIp4, ValueIp6, ValueUuid};
 use super::ServerInfo;
 use crate::compression::LZ4ReadAdapter;
@@ -198,8 +198,8 @@ impl<'a, R: AsyncRead + Unpin + Send> ResponseStream<'a, R> {
                 }
                 SERVER_PROGRESS => {
                     let revision = self.info.revision;
-                    let (_rows, _bytes, _total) =
-                        read_progress(self.reader.inner_ref(), revision).await?;
+                    let progress = read_progress(self.reader.inner_ref(), revision).await?;
+                    return Ok(Some(Response::Progress(progress)));
                 }
                 code => {
                     self.set_fuse();
@@ -260,10 +260,7 @@ pub(crate) async fn load_nulls<R: AsyncBufRead + Unpin>(
     mut reader: R,
     rows: u64,
 ) -> Result<Vec<u8>> {
-    let mut nulls: Vec<u8> = Vec::with_capacity(rows as usize);
-    unsafe {
-        nulls.set_len(rows as usize);
-    };
+    let mut nulls = vec![0u8; rows as usize];
     reader.read_exact(nulls.as_mut_slice()).await?;
 
     Ok(nulls)
@@ -595,7 +592,7 @@ where
     Ok(Response::Hello(name, major, minor, revision, timezone))
 }
 
-async fn read_progress<R>(reader: R, revision: u32) -> Result<(u64, u64, u64)>
+async fn read_progress<R>(reader: R, revision: u32) -> Result<Progress>
 where
     R: AsyncBufRead + Unpin,
 {
@@ -609,7 +606,7 @@ where
     } else {
         0
     };
-    Ok((rows, bytes, total))
+    Ok(Progress::new(rows, bytes, total))
 }
 
 async fn read_profile<R>(reader: R) -> Result<ProfileInfo>
@@ -646,6 +643,7 @@ mod test {
     use std::pin::Pin;
     use std::task::{Context, Poll};
     use tokio::io::AsyncRead;
+    use tokio::io::ReadBuf;
 
     struct AsyncChunk<'a> {
         buf: &'a [u8],
@@ -669,11 +667,12 @@ mod test {
         fn poll_read(
             self: Pin<&mut Self>,
             cx: &mut Context<'_>,
-            buf: &mut [u8],
-        ) -> Poll<io::Result<usize>> {
-            let size = cmp::min(self.cs as usize, buf.len());
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            let size = cmp::min(self.cs as usize, buf.remaining());
+
             if size == 0 {
-                return Poll::Ready(Ok(0));
+                return Poll::Ready(Ok(()));
             };
 
             let me = self.get_mut();
@@ -686,8 +685,10 @@ mod test {
                     return Poll::Pending;
                 }
             }
-            let size = io::Read::read(&mut me.buf, &mut buf[0..size])?;
-            Ok(size).into()
+            let _ = io::Read::read(&mut me.buf, buf.initialize_unfilled_to(size))?;
+            buf.advance(size);
+
+            Poll::Ready(Ok(()))
         }
     }
 

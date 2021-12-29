@@ -2,7 +2,7 @@ use clickhouse_driver::prelude::errors;
 use clickhouse_driver::prelude::*;
 use std::io;
 use std::time::Duration;
-use tokio::{self, time::delay_for};
+use tokio::{self, time::sleep};
 
 mod common;
 use common::{get_config, get_pool, get_pool_extend};
@@ -30,7 +30,7 @@ async fn test_connection_pool() -> io::Result<()> {
             tokio::spawn(async move {
                 let mut conn = pool.connection().await.unwrap();
                 conn.ping().await.expect("ping ok");
-                delay_for(Duration::new(2, 0)).await;
+                sleep(Duration::new(2, 0)).await;
             })
         })
         .collect();
@@ -55,7 +55,7 @@ async fn test_conn_race() -> io::Result<()> {
 
             tokio::spawn(async move {
                 let _ = pool.connection().await.unwrap();
-                delay_for(Duration::new(0, MSEC_100)).await;
+                sleep(Duration::new(0, MSEC_100)).await;
             })
         })
         .collect();
@@ -84,7 +84,6 @@ async fn test_ping() -> errors::Result<()> {
     let err_timeout = conn.ping().await;
 
     // assert!(err_timeout.unwrap_err().is_timeout());
-
 
     let config = get_config().set_timeout(Duration::from_nanos(1));
 

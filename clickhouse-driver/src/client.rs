@@ -1,11 +1,12 @@
 use std::fmt;
 use std::io;
-use std::net::Shutdown;
 use std::time::Duration;
 
 use crate::protocol::block::{Block, ServerBlock};
+use crate::protocol::code::SERVER_PROGRESS;
 use crate::protocol::command::{CommandSink, ResponseStream};
 use crate::protocol::insert::InsertSink;
+use crate::protocol::packet::Progress;
 use crate::protocol::packet::Response;
 use crate::protocol::packet::{Execute, Hello, Ping};
 use crate::protocol::query::Query;
@@ -70,6 +71,7 @@ pub(super) type InnerConection = Inner;
 
 pub struct QueryResult<'a, R: AsyncRead> {
     pub(crate) inner: ResponseStream<'a, R>,
+    pub progress: Progress,
 }
 
 impl<'a, R: AsyncWrite + AsyncRead + Unpin + Send> QueryResult<'a, R> {
@@ -83,8 +85,8 @@ impl<'a, R: AsyncRead + Unpin + Send> QueryResult<'a, R> {
         while let Some(packet) = self.inner.next().await? {
             if let Response::Data(block) = packet {
                 return Ok(Some(block));
-            } else {
-                //println!("packet {:?}", packet);
+            } else if let Response::Progress(progress) = packet {
+                self.progress.update(progress);
             }
         }
         Ok(None)
@@ -136,11 +138,13 @@ impl Inner {
     }
 
     /// Split self into Stream and ServerInfo
+    #[allow(clippy::manual_map)]
     #[inline]
     pub(super) fn split(&mut self) -> Option<(&mut (dyn AsyncReadWrite + '_), &mut ServerInfo)> {
         let info = &mut self.info as *mut ServerInfo;
         // SAFETY: This can be risky if caller use returned values inside Connection
         // or InnerConnection methods. Never do it.
+
         match self.socket {
             None => None,
             Some(ref mut socket) => unsafe { Some((socket, &mut *info)) },
@@ -150,7 +154,7 @@ impl Inner {
     /// Establish a connection to a Clickhouse server
     pub(super) async fn init(options: &Options, addr: &str) -> Result<Box<Inner>> {
         let socket = TcpStream::connect(addr).await?;
-        Inner::setup_stream(&socket, &options)?;
+        Inner::setup_stream(&socket, options)?;
         info!(
             "connection  established to: {}",
             socket.peer_addr().unwrap()
@@ -182,7 +186,7 @@ impl Inner {
             let (revision, timezone) = match stream.next().await? {
                 Some(Response::Hello(_name, _major, _minor, revision, tz)) => (revision as u32, tz),
                 _ => {
-                    socket.shutdown(Shutdown::Both)?;
+                    socket.shutdown().await?;
                     return Err(DriverError::ConnectionTimeout.into());
                 }
             };
@@ -198,8 +202,9 @@ impl Inner {
     }
 
     #[inline]
-    fn setup_stream(socket: &TcpStream, options: &Options) -> io::Result<()> {
-        socket.set_keepalive(options.keepalive)?;
+    fn setup_stream(socket: &TcpStream, _options: &Options) -> io::Result<()> {
+        // TODO set keepalive
+        // socket.set_keepalive(options.keepalive)?;
         socket.set_nodelay(true)
     }
 
@@ -290,10 +295,10 @@ impl Connection {
     }
 
     /// Disconnects this connection from server.
-    pub(super) fn disconnect(mut self) -> Result<()> {
-        if let Some(socket) = self.inner.socket.take() {
+    pub(super) async fn disconnect(mut self) -> Result<()> {
+        if let Some(mut socket) = self.inner.socket.take() {
             debug!("disconnect method. shutdown connection");
-            socket.shutdown(Shutdown::Both)?;
+            socket.shutdown().await?;
         }
         Ok(())
     }
@@ -315,7 +320,7 @@ impl Connection {
     /// associated with the connection
     pub async fn close(mut self) -> Result<()> {
         self.inner.cleanup().await?;
-        self.disconnect()
+        self.disconnect().await
     }
 
     /// Ping-pong connection verification
@@ -353,9 +358,11 @@ impl Connection {
 
         let mut stream = self.write_command(self.options().execute_timeout).await?;
 
-        if let Some(packet) = stream.next().await? {
-            warn!("execute method returns packet {}", packet.code());
-            return Err(DriverError::PacketOutOfOrder(packet.code()).into());
+        while let Some(packet) = stream.next().await? {
+            if packet.code() != SERVER_PROGRESS {
+                warn!("execute method returns packet {}", packet.code());
+                return Err(DriverError::PacketOutOfOrder(packet.code()).into());
+            }
         }
 
         Ok(())
@@ -369,7 +376,7 @@ impl Connection {
     ) -> Result<InsertSink<'_, &mut dyn AsyncReadWrite>> {
         check_pending!(self);
 
-        let query = Query::from_block(&data);
+        let query = Query::from_block(data);
         self.out.clear();
         Execute { query }.write(self.inner.info(), &mut self.out)?;
 
@@ -379,16 +386,25 @@ impl Connection {
         // Before call insert we will check input data against server table structure
         stream.skip_empty = false;
         //stream.set_pending();
-        let mut stream = if let Some(Response::Data(block)) = stream.next().await? {
-            InsertSink::new(stream, block)
-        } else {
-            stream.set_deteriorated();
-            warn!("insert method. unknown packet received");
-            return Err(DriverError::PacketOutOfOrder(0).into());
-        };
 
-        stream.next(&data).await?;
-        Ok(stream)
+        while let Some(packet) = stream.next().await? {
+            match packet {
+                Response::Progress(_) => {
+                    continue;
+                }
+                Response::Data(block) => {
+                    let mut st = InsertSink::new(stream, block);
+                    st.next(data).await?;
+                    return Ok(st);
+                }
+                _ => {
+                    stream.set_deteriorated();
+                    warn!("insert method. unknown packet received");
+                    return Err(DriverError::PacketOutOfOrder(0).into());
+                }
+            }
+        }
+        unreachable!()
     }
     /// Execute SELECT statement returning sequence of ServerBlocks.
     ///
@@ -411,7 +427,10 @@ impl Connection {
 
         let stream = self.write_command(self.options().query_timeout).await?;
 
-        Ok(QueryResult { inner: stream })
+        Ok(QueryResult {
+            inner: stream,
+            progress: Progress::default(),
+        })
     }
 
     /// Take inner connection. Drain itself

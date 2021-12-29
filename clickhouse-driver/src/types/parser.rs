@@ -284,7 +284,7 @@ pub fn parse_type_field(t: &str) -> Result<Field> {
                 meta: None,
             })
         };
-    };
+    }
 
     if t.eq("String") {
         return field!(SqlType::String);

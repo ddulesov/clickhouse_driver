@@ -471,8 +471,8 @@ async fn test_insert_ip() -> errors::Result<()> {
     let ip4: Ipv4Addr = "127.0.0.1".parse().unwrap();
     let ip6 = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0x1);
 
-    assert_eq!(ip6.is_loopback(), true);
-    assert_eq!(ip4.is_loopback(), true);
+    assert!(ip6.is_loopback());
+    assert!(ip4.is_loopback());
     let data_0 = vec![0u64, 1, 2, 3, 4, 5];
     let data_1 = vec![ip4; 6];
     let data_2 = vec![ip6; 6];

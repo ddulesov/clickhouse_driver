@@ -17,7 +17,7 @@ struct Perf {
 
 macro_rules! get {
     ($row: ident, $i: expr, $err: ident) => {
-        $row.value($i)?.ok_or_else($err)?;
+        $row.value($i)?.ok_or_else($err)?
     };
 }
 
