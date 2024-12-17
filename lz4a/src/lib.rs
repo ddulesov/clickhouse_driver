@@ -192,7 +192,7 @@ mod test {
             let mut orig: Vec<u8> = Vec::with_capacity(*sz);
             unsafe {
                 orig.set_len(*sz);
-
+                orig.fill(0);
                 {
                     //it's sort of randomized data
                     orig[0] = 1;
